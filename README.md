@@ -99,7 +99,7 @@ By submitting a contribution, you agree that your changes are provided under the
 
 Listen Carefully does not collect, store, or transmit any user data. All settings are stored locally on your device. No telemetry or analytics are included.
 
-The full privacy policy is available at [privacy-policy.html](privacy-policy.html) and on the Chrome Web Store listing.
+The full privacy policy is available at [listen.powertologic.com](https://listen.powertologic.com) and on the Chrome Web Store listing.
 
 ## License
 
