@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+      </div>
+      <h1 class="title">Listen Carefully</h1>
+    </div>
+
+    <!-- Error display -->
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <!-- Playback controls -->
+    <div class="playback-section">
+      <div class="playback-controls">
+        <button id="btn-prev" class="btn-control" aria-label="Previous sentence" title="Previous sentence (Alt+Shift+Left)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <span>Prev</span>
+        </button>
+        <button id="btn-play" class="btn-control btn-primary" aria-label="Read aloud" title="Read aloud (Alt+P)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          <span>Read</span>
+        </button>
+        <button id="btn-pause" class="btn-control btn-primary" aria-label="Pause playback" title="Pause (Alt+P)" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="8" y1="6" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="18"/></svg>
+          <span>Pause</span>
+        </button>
+        <button id="btn-stop" class="btn-control" aria-label="Stop reading" title="Stop (Alt+S)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/></svg>
+          <span>Stop</span>
+        </button>
+        <button id="btn-next" class="btn-control" aria-label="Next sentence" title="Next sentence (Alt+Shift+Right)">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          <span>Next</span>
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-container" id="progress-container" hidden>
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="progress-info">
+        <span id="status" class="status" aria-live="polite" aria-atomic="true">Ready</span>
+        <span id="reading-info" class="reading-info" hidden></span>
+        <span id="progress-text" class="progress-text" aria-live="polite" hidden></span>
+      </div>
+    </div>
+
+    <!-- Mode + Voice -->
+    <div class="section">
+      <div class="section-header">
+        <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        <span>Voice & Mode</span>
+      </div>
+      <div class="control-group">
+        <label for="mode">Read Mode</label>
+        <select id="mode">
+          <option value="fullpage">Full Page</option>
+          <option value="readfromhere">Read From Here</option>
+          <option value="element">Pick Section</option>
+          <option value="selection">Selected Text</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="voice">Voice</label>
+        <select id="voice">
+          <option value="">Loading voices...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Sliders -->
+    <div class="section">
+      <div class="section-header">
+        <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+        <span>Playback</span>
+      </div>
+      <div class="slider-group">
+        <label for="rate">Speed</label>
+        <div class="slider-row">
+          <input type="range" id="rate" min="0.5" max="3.0" step="0.1" value="1.0">
+          <span class="slider-value" id="rate-value">1.0x</span>
+        </div>
+      </div>
+      <div class="slider-group">
+        <label for="volume">Volume</label>
+        <div class="slider-row">
+          <input type="range" id="volume" min="0" max="1.0" step="0.05" value="1.0">
+          <span class="slider-value" id="volume-value">100%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <a href="#" id="open-options" aria-label="Open extension settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

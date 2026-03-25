@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <title>Listen Carefully Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="options">
+
+    <!-- Header -->
+    <div class="options-header">
+      <div class="header-logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Listen Carefully</h1>
+        <p class="subtitle">Settings & Configuration</p>
+      </div>
+    </div>
+
+    <!-- Voice -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        <h2>Voice</h2>
+      </div>
+      <div class="card-body">
+        <div class="control-group">
+          <label for="voice">Voice</label>
+          <select id="voice">
+            <option value="">Loading voices...</option>
+          </select>
+        </div>
+        <button id="btn-preview" class="btn" aria-label="Preview selected voice">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Preview Voice
+        </button>
+      </div>
+    </section>
+
+    <!-- Playback -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+        <h2>Playback</h2>
+      </div>
+      <div class="card-body">
+        <div class="slider-group">
+          <label for="rate">Speed</label>
+          <div class="slider-row">
+            <input type="range" id="rate" min="0.5" max="3.0" step="0.1" value="1.0">
+            <span class="slider-value" id="rate-value">1.0x</span>
+          </div>
+        </div>
+        <div class="slider-group">
+          <label for="volume">Volume</label>
+          <div class="slider-row">
+            <input type="range" id="volume" min="0" max="1.0" step="0.05" value="1.0">
+            <span class="slider-value" id="volume-value">100%</span>
+          </div>
+        </div>
+        <div class="slider-group">
+          <label for="pitch">Pitch</label>
+          <div class="slider-row">
+            <input type="range" id="pitch" min="0.5" max="2.0" step="0.1" value="1.0">
+            <span class="slider-value" id="pitch-value">1.0</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Highlight -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <h2>Highlight</h2>
+      </div>
+      <div class="card-body">
+        <div class="color-row">
+          <div class="color-group">
+            <label for="highlight-bg">Background</label>
+            <input type="color" id="highlight-bg" aria-label="Highlight background color" value="#FFEB3B">
+          </div>
+          <div class="color-group">
+            <label for="highlight-fg">Text Color</label>
+            <input type="color" id="highlight-fg" aria-label="Highlight text color" value="#000000">
+          </div>
+        </div>
+        <div class="preset-row">
+          <button class="preset" data-bg="#FFEB3B" data-fg="#000000" aria-label="Yellow highlight preset"><span style="background:#FFEB3B;color:#000000">Yellow</span></button>
+          <button class="preset" data-bg="#4FC3F7" data-fg="#000000" aria-label="Blue highlight preset"><span style="background:#4FC3F7;color:#000000">Blue</span></button>
+          <button class="preset" data-bg="#7CF145" data-fg="#000000" aria-label="Lime highlight preset"><span style="background:#7CF145;color:#000000">Lime</span></button>
+          <button class="preset" data-bg="#FF8A65" data-fg="#000000" aria-label="Orange highlight preset"><span style="background:#FF8A65;color:#000000">Orange</span></button>
+          <button class="preset" data-bg="#CE93D8" data-fg="#000000" aria-label="Purple highlight preset"><span style="background:#CE93D8;color:#000000">Purple</span></button>
+          <button class="preset" data-bg="#263238" data-fg="#E0E0E0" aria-label="Dark highlight preset"><span style="background:#263238;color:#E0E0E0">Dark</span></button>
+          <button class="preset" data-bg="#003B6F" data-fg="#FFFFFF" aria-label="Tardis highlight preset"><span style="background:#003B6F;color:#FFFFFF">Tardis</span></button>
+        </div>
+        <label class="toggle-label">
+          <span>Neon glow</span>
+          <input type="checkbox" id="neon-highlight" role="switch">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <div class="preview-box" id="highlight-preview">
+          This is how <span>highlighted</span> words will look
+        </div>
+      </div>
+    </section>
+
+    <!-- Content Filtering -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        <h2>Content Filtering</h2>
+      </div>
+      <div class="card-body toggles">
+        <label class="toggle-label">
+          <span>Skip code blocks</span>
+          <input type="checkbox" id="skip-code" role="switch" checked>
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-label">
+          <span>Skip image alt-text</span>
+          <input type="checkbox" id="skip-alt" role="switch">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-label">
+          <span>Skip links</span>
+          <input type="checkbox" id="skip-links" role="switch">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-label">
+          <span>Punctuation pauses <span class="hint-inline">split at . ! ? : ;</span></span>
+          <input type="checkbox" id="punctuation-pauses" role="switch" checked>
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-label">
+          <span>Focus mode <span class="hint-inline">AD(H)D friendly - dims page, shows only the active sentence or line</span></span>
+          <select id="focus-mode" class="inline-select" aria-label="Focus mode">
+            <option value="off">Off</option>
+            <option value="sentence">Active text</option>
+            <option value="line">Active line</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <!-- Keyboard Shortcuts -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M6 16h12"/></svg>
+        <h2>Keyboard Shortcuts</h2>
+      </div>
+      <div class="card-body">
+        <div class="shortcut-section">
+          <h3>Playback</h3>
+          <div class="shortcut-item"><span>Play / Pause</span><kbd>Alt + P</kbd></div>
+          <div class="shortcut-item"><span>Stop</span><kbd>Alt + S</kbd></div>
+        </div>
+        <div class="shortcut-section">
+          <h3>Navigation</h3>
+          <div class="shortcut-item"><span>Next sentence</span><kbd>Alt + Shift + →</kbd></div>
+          <div class="shortcut-item"><span>Previous sentence</span><kbd>Alt + Shift + ←</kbd></div>
+        </div>
+        <div class="shortcut-section">
+          <h3>Speed</h3>
+          <div class="shortcut-item"><span>Speed up (+0.1x)</span><kbd>Alt + Shift + ↑</kbd></div>
+          <div class="shortcut-item"><span>Speed down (-0.1x)</span><kbd>Alt + Shift + ↓</kbd></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Saved toast -->
+    <div id="saved-msg" class="saved-msg" role="status" aria-live="polite">
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      Settings saved
+    </div>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>
