@@ -23,3 +23,18 @@
   background-color: #FFEB3B;
   color: #000000;
 }
+
+/* In smooth mode, snap word color/bg instantly — the overlay handles visual continuity */
+.tts-smooth-highlight .tts-word {
+  transition: opacity 0.2s ease;
+}
+
+/* Sliding highlight overlay (absolute within the reading container) */
+.tts-highlight-overlay {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 3px;
+  opacity: 0.55;
+  will-change: left, top, width, height;
+  transition: left 0.15s ease, top 0.15s ease, width 0.15s ease, height 0.15s ease;
+}

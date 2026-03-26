@@ -30,6 +30,7 @@
     skipLinks: document.getElementById('skip-links'),
     punctuationPauses: document.getElementById('punctuation-pauses'),
     neonHighlight: document.getElementById('neon-highlight'),
+    smoothHighlight: document.getElementById('smooth-highlight'),
     focusMode: document.getElementById('focus-mode'),
     savedMsg: document.getElementById('saved-msg'),
   };
@@ -45,6 +46,7 @@
     skipAltText: false,
     skipLinks: false,
     neonHighlight: true,
+    smoothHighlight: false,
     punctuationPauses: true,
     focusMode: 'off',
   };
@@ -112,6 +114,7 @@
     els.skipAlt.checked = s.skipAltText;
     els.skipLinks.checked = s.skipLinks;
     els.neonHighlight.checked = s.neonHighlight;
+    els.smoothHighlight.checked = s.smoothHighlight;
     els.punctuationPauses.checked = s.punctuationPauses;
     // Backward compat: convert old boolean focusMode to string
     const fm = s.focusMode === true ? 'sentence' : (s.focusMode || 'off');
@@ -193,6 +196,7 @@
     save({ neonHighlight: els.neonHighlight.checked });
     updatePreview();
   });
+  els.smoothHighlight.addEventListener('change', () => save({ smoothHighlight: els.smoothHighlight.checked }));
   els.skipCode.addEventListener('change', () => save({ skipCodeBlocks: els.skipCode.checked }));
   els.skipAlt.addEventListener('change', () => save({ skipAltText: els.skipAlt.checked }));
   els.skipLinks.addEventListener('change', () => save({ skipLinks: els.skipLinks.checked }));

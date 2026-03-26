@@ -109,6 +109,7 @@
       skipAltText: false,
       skipLinks: false,
       neonHighlight: true,
+      smoothHighlight: false,
       punctuationPauses: true,
       focusMode: 'off',
     };

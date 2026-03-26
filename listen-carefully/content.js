@@ -88,6 +88,7 @@
         neonHighlight: true,
         punctuationPauses: true,
         focusMode: 'off',
+        smoothHighlight: false,
       }, (settings) => {
         engine.updateSettings({
           voiceURI: settings.voiceURI,
@@ -131,6 +132,7 @@
     // Backward compat: convert old boolean focusMode to string
     const fm = settings.focusMode === true ? 'sentence' : (settings.focusMode || 'off');
     highlighter.focusMode = fm;
+    highlighter.smoothHighlight = !!settings.smoothHighlight;
     highlighter.prepare(container, skipSelectors, range);
 
     // Build sentences directly from spans - word counts are guaranteed to match

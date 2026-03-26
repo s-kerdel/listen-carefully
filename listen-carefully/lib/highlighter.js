@@ -30,6 +30,9 @@ class Highlighter {
     this.skipSelectors = [];
     this._selectedTextNodes = null;
     this.focusMode = 'off';
+    this.smoothHighlight = false;
+    this._overlay = null;
+    this._didSetContainerPosition = false;
     this.settings = {
       highlightBg: '#FFEB3B',
       highlightFg: '#000000',
@@ -86,6 +89,11 @@ class Highlighter {
     }
 
     this._detectBlockBreaks();
+
+    if (this.smoothHighlight) {
+      this.container.classList.add('tts-smooth-highlight');
+      this._createOverlay();
+    }
 
     // Add focus class to dim non-active words (only in focus mode)
     if (this.focusMode && this.focusMode !== 'off' && this.container) {
@@ -274,6 +282,67 @@ class Highlighter {
     return lineSpans;
   }
 
+  // --- Sliding highlight overlay ---
+
+  _createOverlay() {
+    if (this._overlay || !this.container) return;
+
+    // Ensure the container is a positioning ancestor for the overlay
+    const cs = getComputedStyle(this.container);
+    if (cs.position === 'static') {
+      this.container.style.position = 'relative';
+      this._didSetContainerPosition = true;
+    }
+
+    this._overlay = document.createElement('div');
+    this._overlay.className = 'tts-highlight-overlay';
+    this._overlay.style.display = 'none';
+    this.container.appendChild(this._overlay);
+  }
+
+  _positionOverlay(span, animate) {
+    if (!this._overlay || !this.container) return;
+    const spanRect = span.getBoundingClientRect();
+    const containerRect = this.container.getBoundingClientRect();
+
+    const left = spanRect.left - containerRect.left + this.container.scrollLeft;
+    const top = spanRect.top - containerRect.top + this.container.scrollTop;
+
+    if (!animate) {
+      this._overlay.style.transition = 'none';
+    }
+
+    this._overlay.style.left = left + 'px';
+    this._overlay.style.top = top + 'px';
+    this._overlay.style.width = spanRect.width + 'px';
+    this._overlay.style.height = spanRect.height + 'px';
+    this._overlay.style.display = '';
+
+    if (!animate) {
+      this._overlay.offsetHeight;
+      this._overlay.style.transition = '';
+    }
+
+    const bg = this.settings.highlightBg;
+    this._overlay.style.backgroundColor = bg;
+    if (this.settings.neonHighlight) {
+      this._overlay.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
+    } else {
+      this._overlay.style.boxShadow = '';
+    }
+  }
+
+  _removeOverlay() {
+    if (this._overlay) {
+      this._overlay.remove();
+      this._overlay = null;
+    }
+    if (this._didSetContainerPosition && this.container) {
+      this.container.style.position = '';
+      this._didSetContainerPosition = false;
+    }
+  }
+
   // --- Highlighting ---
 
   highlightWord(charIndex, charLength, sentenceIndex) {
@@ -308,8 +377,8 @@ class Highlighter {
     // Clear previous word highlight
     if (this.currentSpan) {
       this.currentSpan.classList.remove('tts-word-active');
-      this.currentSpan.style.backgroundColor = '';
       this.currentSpan.style.color = '';
+      this.currentSpan.style.backgroundColor = '';
       this.currentSpan.style.boxShadow = '';
     }
 
@@ -321,37 +390,49 @@ class Highlighter {
       this._currentSentenceSpans = null;
     }
 
-    if (wordIndex >= 0 && wordIndex < this.wordSpans.length) {
-      // Focus mode: highlight surrounding context
-      if (this.focusMode === 'sentence') {
-        for (const info of this.sentenceMap) {
-          if (wordIndex >= info.startWordIndex && wordIndex < info.startWordIndex + info.wordCount) {
-            this._currentSentenceSpans = this.wordSpans.slice(info.startWordIndex, info.startWordIndex + info.wordCount);
-            for (const s of this._currentSentenceSpans) {
-              s.classList.add('tts-sentence-active');
-            }
-            break;
-          }
-        }
-      } else if (this.focusMode === 'line') {
-        this._currentSentenceSpans = this._getVisualLineSpans(wordIndex);
-        for (const s of this._currentSentenceSpans) {
-          s.classList.add('tts-sentence-active');
-        }
-      }
-
-      // Highlight the active word
-      const span = this.wordSpans[wordIndex];
-      span.classList.add('tts-word-active');
-      const bg = this.settings.highlightBg;
-      span.style.backgroundColor = bg;
-      span.style.color = this.settings.highlightFg;
-      if (this.settings.neonHighlight) {
-        span.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
-      }
-      this.currentSpan = span;
-      this._scrollToSpan(span);
+    if (wordIndex < 0 || wordIndex >= this.wordSpans.length) {
+      if (this._overlay) this._overlay.style.display = 'none';
+      return;
     }
+
+    // Focus mode: highlight surrounding context
+    if (this.focusMode === 'sentence') {
+      for (const info of this.sentenceMap) {
+        if (wordIndex >= info.startWordIndex && wordIndex < info.startWordIndex + info.wordCount) {
+          this._currentSentenceSpans = this.wordSpans.slice(info.startWordIndex, info.startWordIndex + info.wordCount);
+          for (const s of this._currentSentenceSpans) {
+            s.classList.add('tts-sentence-active');
+          }
+          break;
+        }
+      }
+    } else if (this.focusMode === 'line') {
+      this._currentSentenceSpans = this._getVisualLineSpans(wordIndex);
+      for (const s of this._currentSentenceSpans) {
+        s.classList.add('tts-sentence-active');
+      }
+    }
+
+    const span = this.wordSpans[wordIndex];
+
+    const bg = this.settings.highlightBg;
+
+    span.style.backgroundColor = bg;
+    span.style.color = this.settings.highlightFg;
+    if (this.settings.neonHighlight) {
+      span.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
+    }
+
+    if (this.smoothHighlight) {
+      const prevRect = this.currentSpan?.getBoundingClientRect();
+      const newRect = span.getBoundingClientRect();
+      const sameLine = prevRect && Math.abs(prevRect.top - newRect.top) < newRect.height * 0.5;
+      this._positionOverlay(span, sameLine);
+    }
+
+    span.classList.add('tts-word-active');
+    this.currentSpan = span;
+    this._scrollToSpan(span);
   }
 
   _scrollToSpan(span) {
@@ -364,14 +445,21 @@ class Highlighter {
   }
 
   _updateHighlightStyle() {
-    if (this.currentSpan) {
-      const bg = this.settings.highlightBg;
-      this.currentSpan.style.backgroundColor = bg;
-      this.currentSpan.style.color = this.settings.highlightFg;
+    if (!this.currentSpan) return;
+    const bg = this.settings.highlightBg;
+    this.currentSpan.style.color = this.settings.highlightFg;
+    this.currentSpan.style.backgroundColor = bg;
+    if (this.settings.neonHighlight) {
+      this.currentSpan.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
+    } else {
+      this.currentSpan.style.boxShadow = '';
+    }
+    if (this.smoothHighlight && this._overlay) {
+      this._overlay.style.backgroundColor = bg;
       if (this.settings.neonHighlight) {
-        this.currentSpan.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
+        this._overlay.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
       } else {
-        this.currentSpan.style.boxShadow = '';
+        this._overlay.style.boxShadow = '';
       }
     }
   }
@@ -389,8 +477,12 @@ class Highlighter {
       this._currentSentenceSpans = null;
     }
 
-    // Remove focus dimming
-    if (this.container) this.container.classList.remove('tts-reading');
+    // Remove focus dimming and smooth highlight class
+    if (this.container) {
+      this.container.classList.remove('tts-reading');
+      this.container.classList.remove('tts-smooth-highlight');
+    }
+    this._removeOverlay();
 
     const allSpans = document.querySelectorAll('.tts-word');
     for (const span of allSpans) {
