@@ -320,7 +320,7 @@
   });
 
   // --- Keyboard shortcuts ---
-  // Alt+P / Alt+S for play-pause / stop (no Shift - avoids browser conflicts)
+  // Alt+R for full-page read, Alt+P / Alt+S for play-pause / stop
   // Alt+Shift+Arrows for navigation and speed
 
   document.addEventListener('keydown', (e) => {
@@ -331,6 +331,15 @@
       e.preventDefault();
       if (engine.state === 'stopped') startReading();
       else engine.togglePlayPause();
+      return;
+    }
+
+    // Alt+R - Full Page Read
+    if (!e.shiftKey && e.code === 'KeyR') {
+      e.preventDefault();
+      engine.stop();
+      highlighter.cleanup();
+      startReading('fullpage');
       return;
     }
 
