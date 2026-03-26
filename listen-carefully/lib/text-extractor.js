@@ -14,6 +14,8 @@ class TextExtractor {
       '.comments', '.comment-section', '#comments',
       'script', 'style', 'noscript', 'svg', 'canvas',
       'iframe', 'form', 'button', 'input', 'select', 'textarea',
+      '.sr-only', '.visually-hidden', '.screen-reader-text',
+      '[aria-hidden="true"]',
     ];
 
     this.settings = {
@@ -85,9 +87,10 @@ class TextExtractor {
     ];
 
     if (candidates.length > 0) {
-      // Return the one with the most text
+      // Return the one with the most visible text (innerText respects
+      // display:none / visibility:hidden, unlike textContent)
       return candidates.reduce((best, el) =>
-        (el.textContent || '').length > (best.textContent || '').length ? el : best
+        (el.innerText || '').length > (best.innerText || '').length ? el : best
       );
     }
 
@@ -97,11 +100,11 @@ class TextExtractor {
     let bestScore = 0;
 
     for (const block of blocks) {
-      const text = block.textContent || '';
+      const text = block.innerText || '';
       const linkText = Array.from(block.querySelectorAll('a'))
-        .reduce((sum, a) => sum + (a.textContent || '').length, 0);
+        .reduce((sum, a) => sum + (a.innerText || '').length, 0);
 
-      // Score: text length minus link-heavy text, penalize very short blocks
+      // Score: visible text length minus link-heavy text, penalize very short blocks
       const textLen = text.length;
       if (textLen < 150) continue;
 

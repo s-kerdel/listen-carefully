@@ -36,6 +36,8 @@
     '.comments', '.comment-section', '#comments',
     'script', 'style', 'noscript', 'svg', 'canvas',
     'iframe', 'form', 'button', 'input', 'select', 'textarea',
+    '.sr-only', '.visually-hidden', '.screen-reader-text',
+    '[aria-hidden="true"]',
   ];
 
   // --- Wire up TTS engine callbacks ---

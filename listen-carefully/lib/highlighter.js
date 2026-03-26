@@ -162,6 +162,12 @@ class Highlighter {
             return NodeFilter.FILTER_REJECT;
           }
 
+          // Skip text inside elements that are not visible (hidden tabs,
+          // collapsed accordions, display:none sections, etc.)
+          if (typeof parent.checkVisibility === 'function' && !parent.checkVisibility()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
           for (const sel of self.skipSelectors) {
             const match = parent.closest(sel);
             if (match && container.contains(match) && match !== container) {
