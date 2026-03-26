@@ -46,7 +46,10 @@
     setTimeout(() => { els.error.hidden = true; }, 4000);
   }
 
+  let currentState = 'stopped';
+
   function updatePlayPauseButtons(state) {
+    currentState = state;
     if (state === 'playing') {
       els.btnPlay.hidden = true;
       els.btnPause.hidden = false;
@@ -54,10 +57,14 @@
     } else if (state === 'paused') {
       els.btnPlay.hidden = false;
       els.btnPause.hidden = true;
+      els.btnPlay.querySelector('span').textContent = 'Resume';
+      els.btnPlay.setAttribute('aria-label', 'Resume playback');
       els.status.textContent = 'Paused';
     } else {
       els.btnPlay.hidden = false;
       els.btnPause.hidden = true;
+      els.btnPlay.querySelector('span').textContent = 'Read';
+      els.btnPlay.setAttribute('aria-label', 'Read aloud');
       els.status.textContent = 'Ready';
       els.progressContainer.hidden = true;
       els.progressText.hidden = true;
@@ -180,7 +187,11 @@
   // --- Event listeners ---
 
   els.btnPlay.addEventListener('click', () => {
-    sendToTab({ type: 'play', mode: els.mode.value });
+    if (currentState === 'paused') {
+      sendToTab({ type: 'togglePlayPause' });
+    } else {
+      sendToTab({ type: 'play', mode: els.mode.value });
+    }
     updatePlayPauseButtons('playing');
   });
 
