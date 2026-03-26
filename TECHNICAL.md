@@ -32,6 +32,8 @@ Files: `popup/popup.html`, `popup/popup.js`, `popup/popup.css`
 
 The popup is the primary user interface. It opens when the user clicks the toolbar icon and provides playback controls, mode selection, voice selection, and speed and volume sliders. The popup has no direct access to the page DOM or to `speechSynthesis`. All actions are forwarded to the content script via `chrome.tabs.sendMessage`.
 
+When playback is paused, the play button label changes from "Read" to "Resume" and sends a `togglePlayPause` message instead of `play`, so that clicking it resumes from the current position rather than restarting.
+
 The popup polls the content script every 500ms to keep its state synchronized, since runtime messages can be missed if the popup opens after playback has already started.
 
 ### 2.4 Options Page
@@ -63,7 +65,7 @@ Settings changes (voice, rate, pitch, volume) take effect immediately during pla
 
 The Highlighter is the single source of truth for the word list. It performs three operations in sequence:
 
-1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and wraps each word in a `<span class="tts-word">` element. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, etc.) are excluded. If a selection `Range` is provided, only spans whose source text node intersects the range are retained.
+1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and wraps each word in a `<span class="tts-word">` element. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. If a selection `Range` is provided, only spans whose source text node intersects the range are retained.
 
 2. **Build sentences.** The `getSentences()` method constructs sentence strings directly from the wrapped spans. A new sentence boundary is created when a block-level element boundary is detected (e.g., between two `<p>` tags) or when a word ends with sentence-ending punctuation. Because sentences are derived from the actual spans, the word count per sentence is always identical to the span count it covers.
 
@@ -75,7 +77,7 @@ On cleanup, all injected spans are replaced with their original text nodes and `
 
 ### 3.3 TextExtractor (`lib/text-extractor.js`)
 
-The TextExtractor identifies the main content area of a page using a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names. If none are found, it falls back to scoring `<div>` and `<section>` elements by text density, penalizing elements with a high ratio of link text.
+The TextExtractor identifies the main content area of a page using a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names. If none are found, it falls back to scoring `<div>` and `<section>` elements by text density, penalizing elements with a high ratio of link text. Scoring uses `innerText` rather than `textContent` so that hidden content (collapsed accordions, inactive tabs, etc.) does not inflate element scores.
 
 The TextExtractor is used primarily for its `findMainContent()` method, which returns a DOM element. The actual word wrapping and text extraction for TTS is handled by the Highlighter, which operates on the container element that `findMainContent()` returns.
 
@@ -114,6 +116,7 @@ Browser fires SpeechSynthesisUtterance boundary event
 Keyboard shortcuts are handled directly in `content.js` via a `keydown` listener on `document`. They do not route through the popup or background script.
 
 ```
+Alt + R              Start full page read (stops any current session).
 Alt + P              Play or pause toggle.
 Alt + S              Stop playback and clean up highlights.
 Alt + Shift + Right  Skip to next sentence.

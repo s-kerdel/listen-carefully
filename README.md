@@ -53,6 +53,7 @@ Click the extension icon in the toolbar to open the control panel. Select a read
 
 | Action              | Shortcut             |
 |---------------------|----------------------|
+| Full page read      | Alt + R              |
 | Play or pause       | Alt + P              |
 | Stop                | Alt + S              |
 | Next sentence       | Alt + Shift + Right  |
