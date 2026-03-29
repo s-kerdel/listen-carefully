@@ -74,12 +74,7 @@ class TTSEngine {
    * Load sentences into the queue and start playing.
    */
   play(sentences) {
-    if (this.state === 'paused' && this.queue.length > 0) {
-      this.resume();
-      return;
-    }
-
-    // Cancel previous playback without triggering onEnd.
+    // Cancel previous playback (including paused) without triggering onEnd.
     // stop() fires onEnd which cleans up the highlighter - we must NOT do
     // that here because the caller has already set up new highlight state.
     this._skipping = true;
