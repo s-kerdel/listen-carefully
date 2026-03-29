@@ -297,16 +297,6 @@ class TTSEngine {
 
   // --- Kokoro (API) backend ---
 
-  /** Only allow fetches to loopback addresses. */
-  static _isLocalhostURL(urlStr) {
-    try {
-      const url = new URL(urlStr);
-      return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    } catch {
-      return false;
-    }
-  }
-
   async _speakNextKokoro() {
     const text = this.queue[this.currentIndex];
     const sentenceIndex = this.currentIndex;
@@ -315,44 +305,28 @@ class TTSEngine {
     // Fire onSentenceStart immediately so the first word highlights while audio loads
     if (this.onSentenceStart) this.onSentenceStart(sentenceIndex);
 
-    if (!TTSEngine._isLocalhostURL(endpoint)) {
-      if (this.onError) this.onError('Kokoro endpoint must be a localhost address.');
-      this.stop();
-      return;
-    }
-
     try {
-      // Use captioned_speech for word-level timestamps; falls back gracefully
-      const fetchResponse = await fetch(`${endpoint}/dev/captioned_speech`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'kokoro',
-          voice: this.settings.kokoroVoice || 'af_alloy',
-          input: text,
-          speed: this.settings.rate || 1.0,
-          response_format: 'mp3',
-          stream: false,
-          return_timestamps: true,
-        }),
+      // Route through background service worker to avoid per-site permission prompts.
+      // Background validates localhost and returns JSON (base64 audio + timestamps).
+      const data = await chrome.runtime.sendMessage({
+        type: 'kokoroTTS',
+        text,
+        endpoint,
+        voice: this.settings.kokoroVoice || 'af_alloy',
+        speed: this.settings.rate || 1.0,
       });
 
       // Bail if we were stopped/skipped while waiting for the API
       if (this.state !== 'playing' || this.currentIndex !== sentenceIndex) return;
 
-      if (!fetchResponse.ok) {
-        console.warn('Kokoro TTS error:', fetchResponse.status, fetchResponse.statusText);
+      if (!data || data.error) {
+        console.warn('Kokoro TTS error:', data?.error || 'No response');
         this._handleKokoroFailure();
         return;
       }
 
       // Success - reset failure counter
       this._kokoroFailCount = 0;
-
-      const data = await fetchResponse.json();
-
-      // Bail if stopped/skipped during JSON parsing
-      if (this.state !== 'playing' || this.currentIndex !== sentenceIndex) return;
 
       // Validate and cap payload to prevent OOM from malicious responses
       if (!data.audio || data.audio.length > 15_000_000) {

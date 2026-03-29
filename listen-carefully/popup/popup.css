@@ -399,8 +399,7 @@ select optgroup { background: var(--bg-input); color: var(--text-secondary); }
 .engine-badge .badge-detail {
   font-weight: 400;
   color: var(--text-secondary);
-  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* --- Color pickers --- */

@@ -97,6 +97,23 @@
     }
   }
 
+  // --- Kokoro voice display ---
+
+  const KOKORO_LANGS = {
+    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
+    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
+  };
+  const KOKORO_GENDERS = { f: 'Female', m: 'Male' };
+
+  function kokoroVoiceLabel(id) {
+    if (!id || id.length < 4 || id[2] !== '_'
+        || !(id[0] in KOKORO_LANGS) || !(id[1] in KOKORO_GENDERS)) return id;
+    const name = id.split('_').slice(1).join('_');
+    if (!name) return id;
+    const pretty = name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
+    return `${pretty} - ${KOKORO_GENDERS[id[1]]} (${KOKORO_LANGS[id[0]]})`;
+  }
+
   // --- Load saved settings ---
 
   function updateBackendUI(backend, kokoroVoice) {
@@ -104,7 +121,7 @@
     els.voiceGroup.hidden = isKokoro;
     els.kokoroInfo.hidden = !isKokoro;
     if (isKokoro && kokoroVoice) {
-      els.kokoroVoiceLabel.textContent = kokoroVoice;
+      els.kokoroVoiceLabel.textContent = kokoroVoiceLabel(kokoroVoice);
     }
   }
 

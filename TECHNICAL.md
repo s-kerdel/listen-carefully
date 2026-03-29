@@ -14,9 +14,9 @@ The extension consists of four layers that communicate through Chrome's messagin
 
 File: `background.js`
 
-The service worker is the only component that persists across tab changes. It has two responsibilities: switching the toolbar icon between light and dark variants based on the active page's color scheme, and managing the right-click context menu entry ("Read from here"). It does not handle any TTS logic.
+The service worker is the only component that persists across tab changes. It has three responsibilities: switching the toolbar icon between light and dark variants based on the active page's color scheme, managing the right-click context menu entry ("Read from here"), and proxying Kokoro TTS API requests.
 
-The service worker receives theme detection messages from content scripts and forwards context menu click events to the appropriate tab's content script.
+Kokoro fetches are routed through the service worker rather than the content script to avoid Chrome's per-site permission prompts for cross-origin localhost requests. The service worker validates the endpoint against localhost, fetches from the Kokoro API, and returns the JSON response (base64 audio + timestamps) via `sendResponse`. This is fully JSON-serializable and avoids the ArrayBuffer transfer limitations of Chrome extension messaging.
 
 ### 2.2 Content Script Layer
 
