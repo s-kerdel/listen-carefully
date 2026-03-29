@@ -109,11 +109,27 @@ class TTSEngine {
   pause() {
     if (this.state !== 'playing') return;
     speechSynthesis.pause();
+    this._pausedAt = Date.now();
     this._setState('paused');
   }
 
   resume() {
     if (this.state !== 'paused') return;
+
+    // Chrome silently kills paused utterances after ~15s.
+    // If we've been paused that long, cancel and re-speak the current sentence.
+    // _skipping prevents cancel()'s onend from auto-advancing the queue.
+    const elapsed = Date.now() - (this._pausedAt || 0);
+    if (elapsed > 14000) {
+      this._skipping = true;
+      speechSynthesis.cancel();
+      this._skipping = false;
+      this.currentIndex -= 1; // _speakNext increments
+      this._setState('playing');
+      this._speakNext();
+      return;
+    }
+
     speechSynthesis.resume();
     this._setState('playing');
   }
