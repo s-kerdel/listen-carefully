@@ -1,5 +1,5 @@
 /**
- * Options Page Script - full settings panel with voice preview.
+ * Options Page Script - full settings panel with voice preview and Kokoro TTS configuration.
  */
 
 (function () {
@@ -14,6 +14,13 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
   const els = {
+    ttsBackend: document.getElementById('tts-backend'),
+    kokoroSettings: document.getElementById('kokoro-settings'),
+    kokoroEndpoint: document.getElementById('kokoro-endpoint'),
+    kokoroVoice: document.getElementById('kokoro-voice'),
+    btnTestKokoro: document.getElementById('btn-test-kokoro'),
+    kokoroTestResult: document.getElementById('kokoro-test-result'),
+    voiceSection: document.getElementById('voice-section'),
     voice: document.getElementById('voice'),
     btnPreview: document.getElementById('btn-preview'),
     rate: document.getElementById('rate'),
@@ -49,6 +56,9 @@
     punctuationPauses: true,
     focusMode: 'off',
     autoScroll: true,
+    ttsBackend: 'browser',
+    kokoroEndpoint: 'http://localhost:8880',
+    kokoroVoice: 'af_alloy',
   };
 
   function validHex(str) {
@@ -63,6 +73,103 @@
     els.savedMsg.classList.add('visible');
     clearTimeout(hideTimeout);
     hideTimeout = setTimeout(() => els.savedMsg.classList.remove('visible'), 3000);
+  }
+
+  // --- Backend UI toggle ---
+
+  function updateBackendUI(backend) {
+    const isKokoro = backend === 'kokoro';
+    els.kokoroSettings.hidden = !isKokoro;
+    els.voiceSection.hidden = isKokoro;
+    // Pitch is not supported by Kokoro
+    const pitchGroup = els.pitch.closest('.slider-group');
+    pitchGroup.style.opacity = isKokoro ? '0.4' : '';
+    els.pitch.disabled = isKokoro;
+    if (isKokoro) loadKokoroOptions();
+  }
+
+  // --- Load Kokoro voices and models from API ---
+
+  // Voice prefix → pretty label
+  const KOKORO_LANGS = {
+    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
+    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
+  };
+  const KOKORO_GENDERS = { f: 'Female', m: 'Male' };
+
+  /** Parse voice ID into display name. Falls back to raw ID. */
+  function kokoroVoiceName(id) {
+    if (!id.includes('_')) return id;
+    const name = id.split('_').slice(1).join('_');
+    if (!name) return id;
+    return name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
+  }
+
+  /** Check if voice ID matches the known {lang}{gender}_{name} pattern. */
+  function isKnownVoiceFormat(id) {
+    return id.length >= 4 && id[2] === '_'
+      && id[0] in KOKORO_LANGS && id[1] in KOKORO_GENDERS;
+  }
+
+  /** Format a voice option label: "Alloy - Female (American English)" */
+  function kokoroOptionLabel(id) {
+    if (!isKnownVoiceFormat(id)) return id;
+    const lang = KOKORO_LANGS[id[0]] || '';
+    const gender = KOKORO_GENDERS[id[1]] || '';
+    return `${kokoroVoiceName(id)} - ${gender} (${lang})`;
+  }
+
+  async function loadKokoroOptions() {
+    const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');
+    if (!isLocalhostURL(endpoint)) return;
+
+    const savedVoice = els.kokoroVoice.value;
+
+    try {
+      const res = await fetch(`${endpoint}/v1/audio/voices`).catch(() => null);
+      if (!res?.ok) return;
+
+      const data = await res.json();
+      const voices = Array.isArray(data.voices) ? data.voices.filter(v => typeof v === 'string') : [];
+      if (voices.length === 0) return;
+
+      // Group by language (merge male+female under same lang, like browser voices)
+      const langGroups = {};
+      const ungrouped = [];
+      for (const v of voices) {
+        if (isKnownVoiceFormat(v)) {
+          const langKey = v[0];
+          if (!langGroups[langKey]) langGroups[langKey] = [];
+          langGroups[langKey].push(v);
+        } else {
+          ungrouped.push(v);
+        }
+      }
+
+      els.kokoroVoice.replaceChildren();
+
+      for (const langKey of Object.keys(langGroups).sort()) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = KOKORO_LANGS[langKey] || langKey;
+        for (const v of langGroups[langKey]) {
+          const opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = kokoroOptionLabel(v);
+          optgroup.appendChild(opt);
+        }
+        els.kokoroVoice.appendChild(optgroup);
+      }
+
+      // Voices that don't match the pattern — show raw ID
+      for (const v of ungrouped) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        els.kokoroVoice.appendChild(opt);
+      }
+
+      els.kokoroVoice.value = voices.includes(savedVoice) ? savedVoice : voices[0];
+    } catch { /* API unreachable — keep current dropdown values */ }
   }
 
   // --- Load voices (options page has direct access to speechSynthesis) ---
@@ -102,6 +209,11 @@
   // --- Load settings ---
 
   chrome.storage.local.get(DEFAULTS, (s) => {
+    els.ttsBackend.value = s.ttsBackend;
+    els.kokoroEndpoint.value = s.kokoroEndpoint;
+    els.kokoroVoice.value = s.kokoroVoice;
+    updateBackendUI(s.ttsBackend);
+
     els.rate.value = s.rate;
     els.rateValue.textContent = s.rate.toFixed(1) + 'x';
     els.volume.value = s.volume;
@@ -153,6 +265,102 @@
   });
 
   // --- Event listeners ---
+
+  els.ttsBackend.addEventListener('change', async () => {
+    const backend = els.ttsBackend.value;
+
+    if (backend === 'kokoro') {
+      // Request localhost permission on first Kokoro activation
+      const granted = await chrome.permissions.request({
+        origins: ['http://localhost/*', 'http://127.0.0.1/*'],
+      }).catch(() => false);
+
+      if (!granted) {
+        els.ttsBackend.value = 'browser';
+        return;
+      }
+    }
+
+    updateBackendUI(backend);
+    save({ ttsBackend: backend });
+  });
+
+  let kokoroDebounce;
+  function saveKokoroSetting(key, el) {
+    clearTimeout(kokoroDebounce);
+    kokoroDebounce = setTimeout(() => save({ [key]: el.value }), 300);
+  }
+  let endpointRefreshDebounce;
+  els.kokoroEndpoint.addEventListener('input', () => {
+    if (isLocalhostURL(els.kokoroEndpoint.value)) {
+      saveKokoroSetting('kokoroEndpoint', els.kokoroEndpoint);
+      // Refresh voice dropdown from new endpoint
+      clearTimeout(endpointRefreshDebounce);
+      endpointRefreshDebounce = setTimeout(loadKokoroOptions, 500);
+    }
+  });
+  els.kokoroVoice.addEventListener('change', () => saveKokoroSetting('kokoroVoice', els.kokoroVoice));
+
+  function isLocalhostURL(urlStr) {
+    try {
+      const url = new URL(urlStr);
+      return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  els.btnTestKokoro.addEventListener('click', async () => {
+    const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');
+    const voice = els.kokoroVoice.value || 'af_alloy';
+
+    if (!isLocalhostURL(endpoint)) {
+      els.kokoroTestResult.hidden = false;
+      els.kokoroTestResult.textContent = 'Endpoint must be a localhost address (localhost, 127.0.0.1)';
+      els.kokoroTestResult.className = 'test-result error';
+      return;
+    }
+
+    els.kokoroTestResult.hidden = false;
+    els.kokoroTestResult.textContent = 'Connecting...';
+    els.kokoroTestResult.className = 'test-result testing';
+
+    try {
+      const response = await fetch(`${endpoint}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'kokoro',
+          voice,
+          input: 'Kokoro TTS connection test successful.',
+          speed: parseFloat(els.rate.value) || 1.0,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.volume = parseFloat(els.volume.value) || 1.0;
+      const revoke = () => { URL.revokeObjectURL(url); };
+      audio.onended = () => {
+        revoke();
+        els.kokoroTestResult.textContent = 'Connected successfully';
+        setTimeout(() => { els.kokoroTestResult.hidden = true; }, 3000);
+      };
+      audio.onerror = revoke;
+      audio.play().catch(revoke);
+
+      els.kokoroTestResult.textContent = 'Connected — playing test audio...';
+      els.kokoroTestResult.className = 'test-result success';
+    } catch (err) {
+      els.kokoroTestResult.textContent = 'Failed: ' + err.message;
+      els.kokoroTestResult.className = 'test-result error';
+    }
+  });
 
   els.voice.addEventListener('change', () => save({ voiceURI: els.voice.value }));
 

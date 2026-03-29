@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Listen Carefully is a Chromium-based browser extension that converts webpage text to speech using the Web Speech API. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser with no external network dependencies.
+Listen Carefully is a Chromium-based browser extension that converts webpage text to speech. It supports two TTS backends: the built-in Web Speech API (default) and an optional local Kokoro TTS server. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser with no external network dependencies. The Kokoro backend communicates only with localhost.
 
 The extension is built on Manifest V3 and targets Chrome and Brave on Windows 11, where Microsoft neural voices provide high quality speech synthesis through the operating system.
 
@@ -46,20 +46,37 @@ The options page provides the full settings panel including pitch control, highl
 
 ### 3.1 TTSEngine (`lib/tts-engine.js`)
 
-This class wraps the Web Speech Synthesis API and manages a sentence-level playback queue. The queue design exists to work around a known Chromium limitation where utterances longer than approximately 15 seconds are silently terminated by the browser.
+This class manages a sentence-level playback queue and supports two backends: the Web Speech Synthesis API (browser) and Kokoro (local API). The queue design exists to work around a known Chromium limitation where utterances longer than approximately 15 seconds are silently terminated by the browser. The active backend is determined by the `ttsBackend` setting (`'browser'` or `'kokoro'`).
 
-Each sentence is spoken as an individual `SpeechSynthesisUtterance`. When an utterance finishes, the engine automatically advances to the next sentence in the queue. The engine exposes four callbacks that the orchestrator connects to:
+Each sentence is spoken individually. The browser backend uses `SpeechSynthesisUtterance` objects; the Kokoro backend fetches audio from `POST /dev/captioned_speech` and plays it via an `Audio` element. When a sentence finishes, the engine automatically advances to the next. The engine exposes five callbacks:
 
 ```
 onBoundary(charIndex, charLength, sentenceIndex)    Called on each word boundary during speech.
 onSentenceStart(sentenceIndex)                       Called when a new sentence begins.
 onStateChange(state)                                 Called when playback state changes (playing, paused, stopped).
 onEnd()                                              Called when the entire queue has been spoken.
+onError(message)                                     Called when the Kokoro backend fails (e.g. service unreachable).
 ```
 
-The `_skipping` flag is a guard that prevents `speechSynthesis.cancel()` from triggering the `onend` handler during skip and stop operations. Without this guard, cancelling the current utterance would cause the engine to advance to the next sentence instead of stopping.
+The `_skipping` flag is a guard that prevents `speechSynthesis.cancel()` from triggering the `onend` handler during skip and stop operations. The `_cancelAll()` helper cancels both backends defensively, which is safe regardless of which backend is active.
 
-Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters instead of resuming the stale utterance.
+Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. For the Kokoro backend, volume changes are applied directly to the `Audio` element without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
+
+#### 3.1.1 Kokoro Word Highlighting
+
+The browser backend receives native `onboundary` events with exact character positions. The Kokoro backend uses word-level timestamps from the API response to achieve the same effect.
+
+The `/dev/captioned_speech` endpoint returns base64-encoded audio alongside a `timestamps` array containing `{word, start_time, end_time}` entries. English voices support timestamps; non-English voices return `null`, triggering a character-length-weighted estimation fallback.
+
+Word highlighting is synchronized via a `requestAnimationFrame` loop that reads `audio.currentTime` and finds the matching word timestamp. This approach is drift-free and self-correcting in both directions.
+
+Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`). The timestamp mapping uses a forward scan with text-matching lookahead to re-sync after expanded tokens. Punctuation-only API entries (commas, periods) are skipped in the scan, but their timing gaps are preserved because the next word's `start_time` is naturally after the pause.
+
+#### 3.1.2 Security
+
+Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
+
+Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries. Blob URLs are revoked on all exit paths. Stale async responses are guarded after both `await` points. A 3-strike failure counter stops playback if the Kokoro service is unreachable.
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
@@ -102,6 +119,7 @@ User clicks Play in popup
 
 ### 4.2 Word Highlighting During Playback
 
+Browser backend:
 ```
 Browser fires SpeechSynthesisUtterance boundary event
     TTSEngine calls onBoundary(charIndex, charLength, sentenceIndex)
@@ -109,6 +127,14 @@ Browser fires SpeechSynthesisUtterance boundary event
     Highlighter maps charIndex to global word span index
     Highlighter applies inline styles to the active span
     Highlighter scrolls the span into view if auto-scroll is enabled
+```
+
+Kokoro backend:
+```
+requestAnimationFrame tick reads audio.currentTime
+    TTSEngine finds matching word via timestamp lookup
+    TTSEngine calls onBoundary(charIndex, charLength, sentenceIndex)
+    (same flow as browser backend from here)
 ```
 
 ### 4.3 Keyboard Shortcuts
@@ -132,9 +158,9 @@ Speed changes from keyboard shortcuts are persisted to `chrome.storage.local` an
 All settings are stored in `chrome.storage.local`. No sync storage or external persistence is used. The following keys are stored:
 
 ```
-voiceURI          String or null. The selected voice identifier.
+voiceURI          String or null. The selected browser voice identifier.
 rate              Float, 0.5 to 3.0. Playback speed multiplier.
-pitch             Float, 0.5 to 2.0. Voice pitch.
+pitch             Float, 0.5 to 2.0. Voice pitch (browser backend only).
 volume            Float, 0.0 to 1.0. Playback volume.
 highlightBg       String. CSS hex color for word highlight background.
 highlightFg       String. CSS hex color for word highlight text.
@@ -145,6 +171,10 @@ skipLinks         Boolean. Whether to skip link text.
 neonHighlight     Boolean. Whether to apply a glow effect to the active word.
 punctuationPauses Boolean. Whether punctuation forces a sentence break.
 focusMode         String. One of: off, sentence, line.
+autoScroll        Boolean. Whether to scroll the active word into view.
+ttsBackend        String. One of: browser, kokoro. Default: browser.
+kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
+kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
 ```
 
 Settings defaults are defined in three locations: `content.js` (loadSettings), `popup/popup.js` (loadSettings), and `options/options.js` (DEFAULTS constant). All three must be kept in sync when adding or modifying settings.
@@ -185,12 +215,13 @@ The popup and options page apply a `dark` class to the body element based on the
 
 ```
 listen-carefully/
-    manifest.json              Extension manifest (Manifest V3).
+    manifest.json              Extension manifest (Manifest V3). Includes optional_host_permissions
+                               for localhost, requested only when Kokoro is enabled.
     background.js              Service worker. Icon theming and context menu.
     content.js                 Content script orchestrator. Playback lifecycle and messaging.
     content.css                Injected styles for word highlights and focus mode.
     lib/
-        tts-engine.js          SpeechSynthesis wrapper with sentence queue management.
+        tts-engine.js          Dual-backend TTS engine (Web Speech API + Kokoro).
         highlighter.js         DOM word wrapping, index-based highlighting, focus mode.
         text-extractor.js      Main content detection and text preprocessing.
     popup/

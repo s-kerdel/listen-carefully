@@ -14,6 +14,9 @@
     btnPrev: document.getElementById('btn-prev'),
     btnNext: document.getElementById('btn-next'),
     voice: document.getElementById('voice'),
+    voiceGroup: document.getElementById('voice-group'),
+    kokoroInfo: document.getElementById('kokoro-info'),
+    kokoroVoiceLabel: document.getElementById('kokoro-voice-label'),
     rate: document.getElementById('rate'),
     rateValue: document.getElementById('rate-value'),
     volume: document.getElementById('volume'),
@@ -96,6 +99,15 @@
 
   // --- Load saved settings ---
 
+  function updateBackendUI(backend, kokoroVoice) {
+    const isKokoro = backend === 'kokoro';
+    els.voiceGroup.hidden = isKokoro;
+    els.kokoroInfo.hidden = !isKokoro;
+    if (isKokoro && kokoroVoice) {
+      els.kokoroVoiceLabel.textContent = kokoroVoice;
+    }
+  }
+
   async function loadSettings() {
     const defaults = {
       voiceURI: null,
@@ -111,6 +123,8 @@
       neonHighlight: true,
       punctuationPauses: true,
       focusMode: 'off',
+      ttsBackend: 'browser',
+      kokoroVoice: 'af_alloy',
     };
 
     return new Promise((resolve) => {
@@ -120,6 +134,7 @@
         els.rateValue.textContent = settings.rate.toFixed(1) + 'x';
         els.volume.value = settings.volume;
         els.volumeValue.textContent = Math.round(settings.volume * 100) + '%';
+        updateBackendUI(settings.ttsBackend, settings.kokoroVoice);
         resolve(settings);
       });
     });
@@ -275,8 +290,8 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
   // --- Initialize ---
-  loadSettings().then(() => {
-    loadVoices();
+  loadSettings().then((settings) => {
+    if (settings.ttsBackend !== 'kokoro') loadVoices();
     syncState();
     // Poll state while popup is open - ensures progress/info stay current
     // even if runtime messages are missed

@@ -165,6 +165,100 @@ select:focus {
 select option { background: var(--bg-input); color: var(--text); }
 select optgroup { background: var(--bg-input); color: var(--text-secondary); }
 
+/* --- Text inputs --- */
+input[type="text"],
+input[type="url"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text);
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+input[type="text"]::placeholder,
+input[type="url"]::placeholder {
+  color: var(--text-dim);
+}
+
+/* --- Kokoro settings --- */
+.kokoro-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.kokoro-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  line-height: 1.4;
+}
+
+/* Extra spacing only when followed by the test button in Kokoro settings */
+#kokoro-settings .kokoro-note {
+  margin-bottom: 14px;
+}
+
+.kokoro-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.test-result {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+}
+
+.test-result.testing {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.test-result.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.test-result.error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+body.dark .test-result.success {
+  background: #052e16;
+  color: #86efac;
+  border-color: #166534;
+}
+
+body.dark .test-result.error {
+  background: #2d1515;
+  color: #f87171;
+  border-color: #5c2020;
+}
+
 /* --- Button --- */
 .btn {
   display: inline-flex;

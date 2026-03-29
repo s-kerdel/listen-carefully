@@ -11,7 +11,8 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 3. **Focus mode.** Dims the surrounding text to show only the active sentence or line, designed for users who benefit from reduced visual noise.
 4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse.
 5. **Voice selection.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language.
-6. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension.
+6. **Kokoro TTS support.** Optionally connect to a local [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server for higher quality voices with word-level timestamps. Supports 67 voices across 9 languages. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
+7. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro backend communicates only with a localhost service.
 
 ## Installation
 
@@ -44,6 +45,17 @@ The "Online (Natural)" voices (such as Microsoft Ava, Andrew, and Jenny) provide
 The "Siri" and "Enhanced" voices provide higher quality than the default system voices.
 
 **Note:** some macOS voices may connect to Apple's cloud services for speech synthesis. This is handled by the operating system, not by this extension. See the privacy policy for details.
+
+### Kokoro TTS (optional)
+
+For higher quality local TTS, you can connect to a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server running on your machine.
+
+1. Install and start Kokoro-FastAPI (see its README for setup instructions).
+2. Verify the server is running: `curl http://localhost:8880/v1/models`
+3. In the extension, open **Settings** and change the **TTS Engine** to **Kokoro (Local API)**.
+4. Select a voice from the dropdown and click **Test Connection**.
+
+The extension communicates only with localhost. No page content is sent to external servers. English voices support precise word-level highlighting via API timestamps. Other languages use estimated timing, which may cause the highlight to drift slightly.
 
 ## Usage
 
@@ -78,7 +90,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include voice selection with preview, speed, volume, pitch, highlight colors with presets, neon glow toggle, content filtering (skip code blocks, alt text, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle.
+Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, alt text, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
 
 ## Technical documentation
 
@@ -98,7 +110,7 @@ By submitting a contribution, you agree that your changes are provided under the
 
 ## Privacy
 
-Listen Carefully does not collect, store, or transmit any user data. All settings are stored locally on your device. No telemetry or analytics are included.
+Listen Carefully does not collect, store, or transmit any user data to external servers. All settings are stored locally on your device. No telemetry or analytics are included. The optional Kokoro backend communicates only with a localhost service on your own machine and requires an explicit permission grant.
 
 The full privacy policy is available at [listen.powertologic.com](https://listen.powertologic.com) and on the Chrome Web Store listing.
 

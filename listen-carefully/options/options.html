@@ -24,8 +24,48 @@
       </div>
     </div>
 
-    <!-- Voice -->
+    <!-- TTS Engine -->
     <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        <h2>TTS Engine</h2>
+      </div>
+      <div class="card-body">
+        <div class="control-group">
+          <label for="tts-backend">Engine</label>
+          <select id="tts-backend">
+            <option value="browser">Browser (Web Speech API)</option>
+            <option value="kokoro">Kokoro (Local API)</option>
+          </select>
+        </div>
+        <div id="kokoro-settings" hidden>
+          <div class="kokoro-fields">
+            <div class="control-group">
+              <label for="kokoro-endpoint">API Endpoint</label>
+              <input type="url" id="kokoro-endpoint" value="http://localhost:8880" placeholder="http://localhost:8880">
+            </div>
+            <div class="control-group">
+              <label for="kokoro-voice">Voice</label>
+              <select id="kokoro-voice">
+                <option value="af_alloy">af_alloy</option>
+              </select>
+            </div>
+          </div>
+          <div class="kokoro-note" role="note">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            English voices support precise word-level highlighting via API timestamps. Other languages rely on estimated timing due to API limitations, so highlights may drift slightly from the spoken word.
+          </div>
+          <button id="btn-test-kokoro" class="btn" aria-label="Test Kokoro connection">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Test Connection
+          </button>
+          <div id="kokoro-test-result" class="test-result" role="status" aria-live="polite" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Voice -->
+    <section class="card" id="voice-section">
       <div class="card-header">
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         <h2>Voice</h2>
@@ -36,6 +76,10 @@
           <select id="voice">
             <option value="">Loading voices...</option>
           </select>
+        </div>
+        <div class="kokoro-note" role="note">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Some voices may use cloud services for speech synthesis, depending on your OS and browser. This is handled by the operating system, not by this extension.
         </div>
         <button id="btn-preview" class="btn" aria-label="Preview selected voice">
           <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>

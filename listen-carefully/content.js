@@ -70,6 +70,10 @@
     sendMsg({ type: 'stateChanged', state: 'stopped' });
   });
 
+  engine.onError = safeCall((message) => {
+    sendMsg({ type: 'error', message });
+  });
+
   // --- Load settings from storage ---
 
   function loadSettings() {
@@ -89,12 +93,18 @@
         punctuationPauses: true,
         focusMode: 'off',
         autoScroll: true,
+        ttsBackend: 'browser',
+        kokoroEndpoint: 'http://localhost:8880',
+        kokoroVoice: 'af_alloy',
       }, (settings) => {
         engine.updateSettings({
           voiceURI: settings.voiceURI,
           rate: settings.rate,
           pitch: settings.pitch,
           volume: settings.volume,
+          ttsBackend: settings.ttsBackend,
+          kokoroEndpoint: settings.kokoroEndpoint,
+          kokoroVoice: settings.kokoroVoice,
         });
         highlighter.updateSettings({
           highlightBg: settings.highlightBg,
@@ -292,6 +302,7 @@
           totalSentences: sentences.length,
           wordCount,
           estimatedSeconds: wordCount > 0 ? Math.round((wordCount / wordsPerMin) * 60) : 0,
+          ttsBackend: engine.settings.ttsBackend || 'browser',
         });
         return true;
       }
@@ -310,7 +321,9 @@
 
       case 'updateSettings':
         if (msg.settings) {
-          if (msg.settings.voiceURI || msg.settings.rate || msg.settings.pitch || msg.settings.volume !== undefined) {
+          if (msg.settings.voiceURI || msg.settings.rate || msg.settings.pitch ||
+              msg.settings.volume !== undefined || msg.settings.ttsBackend ||
+              msg.settings.kokoroEndpoint || msg.settings.kokoroVoice) {
             engine.updateSettings(msg.settings);
           }
           if (msg.settings.highlightBg || msg.settings.highlightFg) {
