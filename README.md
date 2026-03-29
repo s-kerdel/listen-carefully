@@ -78,7 +78,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include voice selection with preview, speed, volume, pitch, highlight colors with presets, neon glow toggle, content filtering (skip code blocks, alt text, links), punctuation-based sentence splitting, and focus mode (active sentence or active line).
+Available settings include voice selection with preview, speed, volume, pitch, highlight colors with presets, neon glow toggle, content filtering (skip code blocks, alt text, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle.
 
 ## Technical documentation
 

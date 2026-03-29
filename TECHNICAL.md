@@ -59,7 +59,7 @@ onEnd()                                              Called when the entire queu
 
 The `_skipping` flag is a guard that prevents `speechSynthesis.cancel()` from triggering the `onend` handler during skip and stop operations. Without this guard, cancelling the current utterance would cause the engine to advance to the next sentence instead of stopping.
 
-Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters.
+Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters instead of resuming the stale utterance.
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
@@ -108,7 +108,7 @@ Browser fires SpeechSynthesisUtterance boundary event
     content.js forwards to Highlighter.highlightWord()
     Highlighter maps charIndex to global word span index
     Highlighter applies inline styles to the active span
-    Highlighter scrolls the span into view if needed
+    Highlighter scrolls the span into view if auto-scroll is enabled
 ```
 
 ### 4.3 Keyboard Shortcuts
@@ -222,6 +222,8 @@ listen-carefully/
 ### 10.2 Chromium Utterance Limit
 
 Chromium silently terminates utterances after approximately 15 seconds of continuous speech. The sentence-level queue in TTSEngine is the primary mitigation. Sentences should remain short enough to stay under this limit at 1.0x speed.
+
+Chromium also silently kills paused utterances after approximately 15 seconds, causing `speechSynthesis.resume()` to do nothing. The `resume()` method tracks pause duration via `_pausedAt` and re-speaks the current sentence from the start if more than 14 seconds have elapsed.
 
 ### 10.3 Extension Context Invalidation
 
