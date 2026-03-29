@@ -59,8 +59,12 @@ class TTSEngine {
     const wasPlaying = this.state === 'playing';
     Object.assign(this.settings, settings);
 
+    if (this.state === 'paused') {
+      this._settingsChangedWhilePaused = true;
+    }
+
+    // Restart current sentence so new voice/rate/pitch/volume applies immediately.
     if (wasPlaying && this.queue.length > 0) {
-      // Restart current sentence with new settings
       const idx = this.currentIndex;
       this._skipping = true;
       speechSynthesis.cancel();
@@ -111,11 +115,12 @@ class TTSEngine {
   resume() {
     if (this.state !== 'paused') return;
 
-    // Chrome silently kills paused utterances after ~15s.
-    // If we've been paused that long, cancel and re-speak the current sentence.
+    // Re-speak the current sentence if Chrome killed the utterance (~15s pause)
+    // or if settings changed while paused (old utterance has stale voice/rate/etc).
     // _skipping prevents cancel()'s onend from auto-advancing the queue.
     const elapsed = Date.now() - (this._pausedAt || 0);
-    if (elapsed > 14000) {
+    if (elapsed > 14000 || this._settingsChangedWhilePaused) {
+      this._settingsChangedWhilePaused = false;
       this._skipping = true;
       speechSynthesis.cancel();
       this._skipping = false;
