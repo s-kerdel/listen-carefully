@@ -88,6 +88,7 @@
         neonHighlight: true,
         punctuationPauses: true,
         focusMode: 'off',
+        autoScroll: true,
       }, (settings) => {
         engine.updateSettings({
           voiceURI: settings.voiceURI,
@@ -99,6 +100,7 @@
           highlightBg: settings.highlightBg,
           highlightFg: settings.highlightFg,
           neonHighlight: settings.neonHighlight,
+          autoScroll: settings.autoScroll,
         });
         resolve(settings);
       });

@@ -34,6 +34,7 @@ class Highlighter {
       highlightBg: '#FFEB3B',
       highlightFg: '#000000',
       neonHighlight: true,
+      autoScroll: true,
     };
   }
 
@@ -355,6 +356,7 @@ class Highlighter {
   }
 
   _scrollToSpan(span) {
+    if (!this.settings.autoScroll) return;
     const rect = span.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
 

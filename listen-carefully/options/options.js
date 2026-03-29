@@ -31,6 +31,7 @@
     punctuationPauses: document.getElementById('punctuation-pauses'),
     neonHighlight: document.getElementById('neon-highlight'),
     focusMode: document.getElementById('focus-mode'),
+    autoScroll: document.getElementById('auto-scroll'),
     savedMsg: document.getElementById('saved-msg'),
   };
 
@@ -47,6 +48,7 @@
     neonHighlight: true,
     punctuationPauses: true,
     focusMode: 'off',
+    autoScroll: true,
   };
 
   function validHex(str) {
@@ -116,6 +118,7 @@
     // Backward compat: convert old boolean focusMode to string
     const fm = s.focusMode === true ? 'sentence' : (s.focusMode || 'off');
     els.focusMode.value = fm;
+    els.autoScroll.checked = s.autoScroll;
     updatePreview();
   });
 
@@ -198,6 +201,7 @@
   els.skipLinks.addEventListener('change', () => save({ skipLinks: els.skipLinks.checked }));
   els.punctuationPauses.addEventListener('change', () => save({ punctuationPauses: els.punctuationPauses.checked }));
   els.focusMode.addEventListener('change', () => save({ focusMode: els.focusMode.value }));
+  els.autoScroll.addEventListener('change', () => save({ autoScroll: els.autoScroll.checked }));
 
   // --- Voice preview ---
 
