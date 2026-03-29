@@ -62,7 +62,7 @@
     chrome.storage.local.set(partial);
     els.savedMsg.classList.add('visible');
     clearTimeout(hideTimeout);
-    hideTimeout = setTimeout(() => els.savedMsg.classList.remove('visible'), 2400);
+    hideTimeout = setTimeout(() => els.savedMsg.classList.remove('visible'), 3000);
   }
 
   // --- Load voices (options page has direct access to speechSynthesis) ---

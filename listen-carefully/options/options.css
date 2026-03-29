@@ -491,19 +491,32 @@ kbd {
   bottom: 24px;
   right: 24px;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
   background: var(--bg-card);
   color: var(--success);
-  padding: 12px 20px;
+  padding: 16px 22px;
   border-radius: var(--radius-sm);
-  font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
+}
+
+.saved-msg strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.saved-msg .saved-hint {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 .saved-msg.visible {
