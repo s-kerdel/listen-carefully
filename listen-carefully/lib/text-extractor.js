@@ -7,7 +7,13 @@
  * Readability-style content detection.
  * Finds the element with the most text density.
  */
-function findMainContent() {
+function findMainContent(siteSelector) {
+  // User-defined per-site selector takes priority over all heuristics
+  if (siteSelector) {
+    try { const custom = document.querySelector(siteSelector); if (custom) return custom; }
+    catch { /* invalid selector — fall through to heuristics */ }
+  }
+
   // Try semantic elements first (broad set of common CMS/framework patterns)
   const candidates = [...document.querySelectorAll([
     'article', 'main', '[role="main"]', '[role="article"]',
@@ -27,8 +33,13 @@ function findMainContent() {
     if ((best.innerText || '').trim().length > 0) return _expandForHeading(best);
   }
 
-  // Fallback: score block-level elements by text density
-  const blocks = document.querySelectorAll('div, section');
+  // Fallback: score block-level elements by text density.
+  // Include parents of <p> tags so pages without div/section wrappers
+  // (e.g. bare <p> children of <body>) still get a scored container.
+  const blocks = new Set(document.querySelectorAll('div, section'));
+  for (const p of document.querySelectorAll('p')) {
+    if (p.parentElement) blocks.add(p.parentElement);
+  }
   let best = document.body;
   let bestScore = 0;
 
@@ -71,7 +82,13 @@ function _expandForHeading(el) {
  * Used by "read from here" and element picker to ensure the container
  * actually contains the start point.
  */
-function findContainerFor(el) {
+function findContainerFor(el, siteSelector) {
+  // 0. User-defined per-site selector
+  if (siteSelector) {
+    try { const custom = document.querySelector(siteSelector); if (custom) return custom; }
+    catch { /* invalid selector — fall through to heuristics */ }
+  }
+
   // 1. Semantic container closest to the element
   const semantic = el.closest(
     'article, main, section, [role="main"], [role="article"]'

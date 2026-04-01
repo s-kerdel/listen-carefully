@@ -393,8 +393,9 @@ class TTSEngine {
       };
 
       audio.play().catch((err) => {
+        // AbortError is expected when stop/skip interrupts a pending play()
+        if (err.name === 'AbortError' || this._audio !== audio) return;
         console.warn('Kokoro audio play failed:', err.message);
-        if (this._audio !== audio) return;
         this._clearWordTimer();
         this._revokeBlobUrl();
         this._audio = null;
