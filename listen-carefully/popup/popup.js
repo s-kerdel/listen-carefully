@@ -82,14 +82,14 @@
     return s > 0 ? m + 'm ' + s + 's' : m + 'm';
   }
 
-  function updateProgress(sentenceIndex, totalSentences, wordCount, estimatedSeconds) {
+  function updateProgress(sentenceIndex, totalSentences, wordCount, wordsRead, estimatedSeconds) {
     if (totalSentences <= 0) return;
-    const current = sentenceIndex + 1;
-    const pct = (current / totalSentences) * 100;
+    // Word-based progress — accurate even with mixed long paragraphs and short bullets
+    const pct = wordCount > 0 ? (wordsRead / wordCount) * 100 : 0;
     els.progressContainer.hidden = false;
     els.progressText.hidden = false;
     els.progressBar.style.width = pct + '%';
-    els.progressText.textContent = current + ' / ' + totalSentences;
+    els.progressText.textContent = (sentenceIndex + 1) + ' / ' + totalSentences;
     if (wordCount > 0 && estimatedSeconds > 0) {
       const remaining = Math.round(estimatedSeconds * (1 - pct / 100));
       els.readingInfo.hidden = false;
@@ -97,22 +97,7 @@
     }
   }
 
-  // --- Kokoro voice display ---
-
-  const KOKORO_LANGS = {
-    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
-    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
-  };
-  const KOKORO_GENDERS = { f: 'Female', m: 'Male' };
-
-  function kokoroVoiceLabel(id) {
-    if (!id || id.length < 4 || id[2] !== '_'
-        || !(id[0] in KOKORO_LANGS) || !(id[1] in KOKORO_GENDERS)) return id;
-    const name = id.split('_').slice(1).join('_');
-    if (!name) return id;
-    const pretty = name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
-    return `${pretty} - ${KOKORO_GENDERS[id[1]]} (${KOKORO_LANGS[id[0]]})`;
-  }
+  // formatKokoroVoice, SETTINGS_DEFAULTS loaded from lib/config.js
 
   // --- Load saved settings ---
 
@@ -121,31 +106,13 @@
     els.voiceGroup.hidden = isKokoro;
     els.kokoroInfo.hidden = !isKokoro;
     if (isKokoro && kokoroVoice) {
-      els.kokoroVoiceLabel.textContent = kokoroVoiceLabel(kokoroVoice);
+      els.kokoroVoiceLabel.textContent = formatKokoroVoice(kokoroVoice);
     }
   }
 
   async function loadSettings() {
-    const defaults = {
-      voiceURI: null,
-      rate: 1.0,
-      pitch: 1.0,
-      volume: 1.0,
-      highlightBg: '#FFEB3B',
-      highlightFg: '#000000',
-      mode: 'fullpage',
-      skipCodeBlocks: true,
-      skipAltText: false,
-      skipLinks: false,
-      neonHighlight: true,
-      punctuationPauses: true,
-      focusMode: 'off',
-      ttsBackend: 'browser',
-      kokoroVoice: 'af_alloy',
-    };
-
     return new Promise((resolve) => {
-      chrome.storage.local.get(defaults, (settings) => {
+      chrome.storage.local.get(SETTINGS_DEFAULTS, (settings) => {
         els.mode.value = settings.mode;
         els.rate.value = settings.rate;
         els.rateValue.textContent = settings.rate.toFixed(1) + 'x';
@@ -211,7 +178,7 @@
     if (result) {
       updatePlayPauseButtons(result.state);
       if (result.state !== 'stopped' && result.totalSentences > 0) {
-        updateProgress(result.sentenceIndex, result.totalSentences, result.wordCount, result.estimatedSeconds);
+        updateProgress(result.sentenceIndex, result.totalSentences, result.wordCount, result.wordsRead, result.estimatedSeconds);
       }
     }
   }
@@ -284,7 +251,7 @@
       updatePlayPauseButtons(msg.state);
     }
     if (msg.type === 'progress') {
-      updateProgress(msg.sentenceIndex, msg.totalSentences);
+      updateProgress(msg.sentenceIndex, msg.totalSentences, msg.wordCount, msg.wordsRead, msg.estimatedSeconds);
     }
     if (msg.type === 'settingChanged' && msg.key === 'rate') {
       els.rate.value = msg.value;

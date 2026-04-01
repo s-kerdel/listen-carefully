@@ -42,24 +42,8 @@
     savedMsg: document.getElementById('saved-msg'),
   };
 
-  const DEFAULTS = {
-    voiceURI: null,
-    rate: 1.0,
-    pitch: 1.0,
-    volume: 1.0,
-    highlightBg: '#FFEB3B',
-    highlightFg: '#000000',
-    skipCodeBlocks: true,
-    skipAltText: false,
-    skipLinks: false,
-    neonHighlight: true,
-    punctuationPauses: true,
-    focusMode: 'off',
-    autoScroll: true,
-    ttsBackend: 'browser',
-    kokoroEndpoint: 'http://localhost:8880',
-    kokoroVoice: 'af_alloy',
-  };
+  // SETTINGS_DEFAULTS, KOKORO_LANGS, KOKORO_GENDERS, formatKokoroVoice
+  // loaded from lib/config.js
 
   function validHex(str) {
     return /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$/.test(str) ? str : null;
@@ -90,33 +74,10 @@
 
   // --- Load Kokoro voices and models from API ---
 
-  // Voice prefix → pretty label
-  const KOKORO_LANGS = {
-    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
-    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
-  };
-  const KOKORO_GENDERS = { f: 'Female', m: 'Male' };
-
-  /** Parse voice ID into display name. Falls back to raw ID. */
-  function kokoroVoiceName(id) {
-    if (!id.includes('_')) return id;
-    const name = id.split('_').slice(1).join('_');
-    if (!name) return id;
-    return name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
-  }
-
   /** Check if voice ID matches the known {lang}{gender}_{name} pattern. */
   function isKnownVoiceFormat(id) {
     return id.length >= 4 && id[2] === '_'
       && id[0] in KOKORO_LANGS && id[1] in KOKORO_GENDERS;
-  }
-
-  /** Format a voice option label: "Alloy - Female (American English)" */
-  function kokoroOptionLabel(id) {
-    if (!isKnownVoiceFormat(id)) return id;
-    const lang = KOKORO_LANGS[id[0]] || '';
-    const gender = KOKORO_GENDERS[id[1]] || '';
-    return `${kokoroVoiceName(id)} - ${gender} (${lang})`;
   }
 
   async function loadKokoroOptions() {
@@ -126,7 +87,10 @@
     const savedVoice = els.kokoroVoice.value;
 
     try {
-      const res = await fetch(`${endpoint}/v1/audio/voices`).catch(() => null);
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 15000);
+      const res = await fetch(`${endpoint}/v1/audio/voices`, { signal: ac.signal }).catch(() => null);
+      clearTimeout(t);
       if (!res?.ok) return;
 
       const data = await res.json();
@@ -154,7 +118,7 @@
         for (const v of langGroups[langKey]) {
           const opt = document.createElement('option');
           opt.value = v;
-          opt.textContent = kokoroOptionLabel(v);
+          opt.textContent = formatKokoroVoice(v);
           optgroup.appendChild(opt);
         }
         els.kokoroVoice.appendChild(optgroup);
@@ -208,7 +172,7 @@
 
   // --- Load settings ---
 
-  chrome.storage.local.get(DEFAULTS, (s) => {
+  chrome.storage.local.get(SETTINGS_DEFAULTS, (s) => {
     els.ttsBackend.value = s.ttsBackend;
     els.kokoroEndpoint.value = s.kokoroEndpoint;
     els.kokoroVoice.value = s.kokoroVoice;
@@ -220,8 +184,8 @@
     els.volumeValue.textContent = Math.round(s.volume * 100) + '%';
     els.pitch.value = s.pitch;
     els.pitchValue.textContent = s.pitch.toFixed(1);
-    els.highlightBg.value = validHex(s.highlightBg) || DEFAULTS.highlightBg;
-    els.highlightFg.value = validHex(s.highlightFg) || DEFAULTS.highlightFg;
+    els.highlightBg.value = validHex(s.highlightBg) || SETTINGS_DEFAULTS.highlightBg;
+    els.highlightFg.value = validHex(s.highlightFg) || SETTINGS_DEFAULTS.highlightFg;
     els.skipCode.checked = s.skipCodeBlocks;
     els.skipAlt.checked = s.skipAltText;
     els.skipLinks.checked = s.skipLinks;
@@ -240,8 +204,8 @@
     const span = els.highlightPreview.querySelector('span');
     span.style.borderRadius = '3px';
     span.style.padding = '0 3px';
-    const bg = validHex(els.highlightBg.value) || DEFAULTS.highlightBg;
-    const fg = validHex(els.highlightFg.value) || DEFAULTS.highlightFg;
+    const bg = validHex(els.highlightBg.value) || SETTINGS_DEFAULTS.highlightBg;
+    const fg = validHex(els.highlightFg.value) || SETTINGS_DEFAULTS.highlightFg;
     span.style.backgroundColor = bg;
     span.style.color = fg;
     if (els.neonHighlight.checked) {
@@ -255,8 +219,8 @@
 
   document.querySelectorAll('.preset').forEach(btn => {
     btn.addEventListener('click', () => {
-      const bg = validHex(btn.dataset.bg) || DEFAULTS.highlightBg;
-      const fg = validHex(btn.dataset.fg) || DEFAULTS.highlightFg;
+      const bg = validHex(btn.dataset.bg) || SETTINGS_DEFAULTS.highlightBg;
+      const fg = validHex(btn.dataset.fg) || SETTINGS_DEFAULTS.highlightFg;
       els.highlightBg.value = bg;
       els.highlightFg.value = fg;
       updatePreview();
@@ -281,6 +245,8 @@
       }
     }
 
+    stopAllPreviews();
+    els.kokoroTestResult.hidden = true;
     updateBackendUI(backend);
     save({ ttsBackend: backend });
   });
@@ -326,6 +292,8 @@
     els.kokoroTestResult.className = 'test-result testing';
 
     try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 15000);
       const response = await fetch(`${endpoint}/v1/audio/speech`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,7 +303,9 @@
           input: 'Kokoro TTS connection test successful.',
           speed: parseFloat(els.rate.value) || 1.0,
         }),
+        signal: ac.signal,
       });
+      clearTimeout(t);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -344,8 +314,9 @@
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      _testAudio = audio;
       audio.volume = parseFloat(els.volume.value) || 1.0;
-      const revoke = () => { URL.revokeObjectURL(url); };
+      const revoke = () => { URL.revokeObjectURL(url); if (_testAudio === audio) _testAudio = null; };
       audio.onended = () => {
         revoke();
         els.kokoroTestResult.textContent = 'Connected successfully';
@@ -357,7 +328,8 @@
       els.kokoroTestResult.textContent = 'Connected — playing test audio...';
       els.kokoroTestResult.className = 'test-result success';
     } catch (err) {
-      els.kokoroTestResult.textContent = 'Failed: ' + err.message;
+      const msg = err.name === 'AbortError' ? 'Request timed out' : err.message;
+      els.kokoroTestResult.textContent = 'Failed: ' + msg;
       els.kokoroTestResult.className = 'test-result error';
     }
   });
@@ -411,10 +383,22 @@
   els.focusMode.addEventListener('change', () => save({ focusMode: els.focusMode.value }));
   els.autoScroll.addEventListener('change', () => save({ autoScroll: els.autoScroll.checked }));
 
-  // --- Voice preview ---
+  // --- Voice preview / test playback ---
+
+  let _testAudio = null;
+
+  function stopAllPreviews() {
+    speechSynthesis.cancel();
+    if (_testAudio) {
+      _testAudio.pause();
+      _testAudio.removeAttribute('src');
+      _testAudio.load();
+      _testAudio = null;
+    }
+  }
 
   els.btnPreview.addEventListener('click', () => {
-    speechSynthesis.cancel();
+    stopAllPreviews();
     const utterance = new SpeechSynthesisUtterance(
       'Hello! This is a preview of the selected voice. How does it sound?'
     );

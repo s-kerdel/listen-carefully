@@ -15,7 +15,6 @@
   window.__listenCarefullyInitialized = true;
 
   const engine = new TTSEngine();
-  const extractor = new TextExtractor();
   const highlighter = new Highlighter();
 
   let sentences = [];
@@ -27,18 +26,7 @@
     } catch { /* extension context invalidated */ }
   }
 
-  // Elements to skip when wrapping words
-  const BASE_SKIP_SELECTORS = [
-    'nav', 'header', 'footer', 'aside',
-    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-    '[role="complementary"]', '.sidebar', '.nav', '.menu',
-    '.advertisement', '.ad', '.ads', '.social-share',
-    '.comments', '.comment-section', '#comments',
-    'script', 'style', 'noscript', 'svg', 'canvas',
-    'iframe', 'form', 'button', 'input', 'select', 'textarea',
-    '.sr-only', '.visually-hidden', '.screen-reader-text',
-    '[aria-hidden="true"]',
-  ];
+  // SKIP_SELECTORS loaded from lib/config.js
 
   // --- Wire up TTS engine callbacks ---
   // All callbacks are guarded: after extension reload the context is invalidated
@@ -54,10 +42,16 @@
 
   engine.onSentenceStart = safeCall((sentenceIndex) => {
     highlighter.highlightWord(0, 0, sentenceIndex);
+    const wordCount = highlighter.wordSpans.length;
+    const wordsPerMin = 150 * engine.settings.rate;
+    const wordsRead = highlighter.sentenceMap[sentenceIndex]?.startWordIndex || 0;
     sendMsg({
       type: 'progress',
       sentenceIndex,
       totalSentences: sentences.length,
+      wordCount,
+      wordsRead,
+      estimatedSeconds: wordCount > 0 ? Math.round((wordCount / wordsPerMin) * 60) : 0,
     });
   });
 
@@ -78,25 +72,7 @@
 
   function loadSettings() {
     return new Promise((resolve) => {
-      chrome.storage.local.get({
-        voiceURI: null,
-        rate: 1.0,
-        pitch: 1.0,
-        volume: 1.0,
-        highlightBg: '#FFEB3B',
-        highlightFg: '#000000',
-        mode: 'fullpage',
-        skipCodeBlocks: true,
-        skipAltText: false,
-        skipLinks: false,
-        neonHighlight: true,
-        punctuationPauses: true,
-        focusMode: 'off',
-        autoScroll: true,
-        ttsBackend: 'browser',
-        kokoroEndpoint: 'http://localhost:8880',
-        kokoroVoice: 'af_alloy',
-      }, (settings) => {
+      chrome.storage.local.get(SETTINGS_DEFAULTS, (settings) => {
         engine.updateSettings({
           voiceURI: settings.voiceURI,
           rate: settings.rate,
@@ -118,7 +94,7 @@
   }
 
   function buildSkipSelectors(settings) {
-    const selectors = [...BASE_SKIP_SELECTORS];
+    const selectors = [...SKIP_SELECTORS];
     if (settings.skipCodeBlocks) {
       // Skip <pre> blocks and <code> elements that contain .line spans (real code blocks).
       // Inline <code>word</code> without .line children is kept so terms like
@@ -136,6 +112,9 @@
    * @param {Range}   [range]   - if provided, only read words within this Range (selection mode)
    */
   function startPlayback(container, settings, range) {
+    // Cancel element picker if active — prevents stale click listener
+    if (_activePickerCleanup) _activePickerCleanup();
+
     const skipSelectors = buildSkipSelectors(settings);
 
     // Wrap words - if range is provided, only spans from text nodes
@@ -149,21 +128,10 @@
     sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
     if (sentences.length === 0) {
       highlighter.cleanup();
+      sendMsg({ type: 'stateChanged', state: 'stopped' });
       sendMsg({ type: 'error', message: 'No readable text found.' });
       return;
     }
-
-    // Send estimated reading time to popup
-    const wordCount = highlighter.wordSpans.length;
-    // Average TTS rate: ~150 words/min at 1.0x speed
-    const wordsPerMin = 150 * engine.settings.rate;
-    const estimatedSeconds = Math.round((wordCount / wordsPerMin) * 60);
-    sendMsg({
-      type: 'readingInfo',
-      wordCount,
-      estimatedSeconds,
-      totalSentences: sentences.length,
-    });
 
     engine.play(sentences);
   }
@@ -191,9 +159,9 @@
       selectionRange = selection.getRangeAt(0);
       const ancestor = selectionRange.commonAncestorContainer;
       const selectionEl = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
-      container = extractor.findContainerFor(selectionEl);
+      container = findContainerFor(selectionEl);
     } else {
-      container = extractor.findMainContent();
+      container = findMainContent();
     }
 
     if (!container) {
@@ -223,7 +191,7 @@
       try {
         const s = settings || await loadSettings();
 
-        const container = extractor.findContainerFor(e.target);
+        const container = findContainerFor(e.target);
         if (!container) {
           sendMsg({ type: 'error', message: 'No readable text found on this page.' });
           return;
@@ -272,7 +240,7 @@
         (async () => {
           const s = await loadSettings();
           const startEl = resolveClickTarget(lastRightClickInfo);
-          const container = extractor.findContainerFor(startEl);
+          const container = findContainerFor(startEl);
           if (!container) {
             sendMsg({ type: 'error', message: 'No readable text found on this page.' });
             return;
@@ -316,11 +284,14 @@
       case 'getState': {
         const wordCount = highlighter.wordSpans ? highlighter.wordSpans.length : 0;
         const wordsPerMin = 150 * engine.settings.rate;
+        const si = engine.getCurrentSentenceIndex();
+        const wordsRead = highlighter.sentenceMap?.[si]?.startWordIndex || 0;
         sendResponse({
           state: engine.state,
-          sentenceIndex: engine.getCurrentSentenceIndex(),
+          sentenceIndex: si,
           totalSentences: sentences.length,
           wordCount,
+          wordsRead,
           estimatedSeconds: wordCount > 0 ? Math.round((wordCount / wordsPerMin) * 60) : 0,
           ttsBackend: engine.settings.ttsBackend || 'browser',
         });
@@ -341,13 +312,13 @@
 
       case 'updateSettings':
         if (msg.settings) {
-          if (msg.settings.voiceURI || msg.settings.rate || msg.settings.pitch ||
-              msg.settings.volume !== undefined || msg.settings.ttsBackend ||
-              msg.settings.kokoroEndpoint || msg.settings.kokoroVoice) {
+          const has = (k) => msg.settings[k] !== undefined;
+          if (has('voiceURI') || has('rate') || has('pitch') || has('volume') ||
+              has('ttsBackend') || has('kokoroEndpoint') || has('kokoroVoice')) {
             engine.updateSettings(msg.settings);
           }
-          if (msg.settings.highlightBg || msg.settings.highlightFg ||
-              msg.settings.neonHighlight !== undefined || msg.settings.autoScroll !== undefined) {
+          if (has('highlightBg') || has('highlightFg') ||
+              has('neonHighlight') || has('autoScroll')) {
             highlighter.updateSettings(msg.settings);
           }
         }
