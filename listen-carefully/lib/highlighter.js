@@ -42,14 +42,18 @@ class Highlighter {
     return /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$/.test(str) ? str : null;
   }
 
+  static _SETTINGS_KEYS = ['highlightBg', 'highlightFg', 'neonHighlight', 'autoScroll'];
+
   updateSettings(settings) {
-    if (settings.highlightBg) {
-      settings.highlightBg = Highlighter._validHex(settings.highlightBg) || this.settings.highlightBg;
+    for (const k of Highlighter._SETTINGS_KEYS) {
+      if (!(k in settings)) continue;
+      if (k === 'highlightBg' || k === 'highlightFg') {
+        const valid = Highlighter._validHex(settings[k]);
+        if (valid) this.settings[k] = valid;
+      } else {
+        this.settings[k] = settings[k];
+      }
     }
-    if (settings.highlightFg) {
-      settings.highlightFg = Highlighter._validHex(settings.highlightFg) || this.settings.highlightFg;
-    }
-    Object.assign(this.settings, settings);
     this._updateHighlightStyle();
   }
 
@@ -70,20 +74,30 @@ class Highlighter {
     this.sentenceMap = [];
     this.skipSelectors = skipSelectors || [];
 
-    // Store the range for post-wrap filtering
-    this._selectionRange = range || null;
+    // Selection mode: collect text nodes that intersect the range BEFORE
+    // wrapping, because _wrapWords replaces text nodes with spans which
+    // detaches the range's references and breaks intersectsNode.
     this._selectedTextNodes = null;
+    if (range) {
+      this._selectedTextNodes = new Set();
+      const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+      while (tw.nextNode()) {
+        if (range.intersectsNode(tw.currentNode)) {
+          this._selectedTextNodes.add(tw.currentNode);
+        }
+      }
+    }
 
     this._wrapWords(container);
 
-    // Selection mode: discard spans outside the selection range.
-    // Now that words are individual spans, we can check each one precisely.
-    if (this._selectionRange) {
-      this.wordSpans = this.wordSpans.filter(s => this._selectionRange.intersectsNode(s));
+    // Selection mode: keep only spans from selected text nodes.
+    if (this._selectedTextNodes) {
+      this.wordSpans = this.wordSpans.filter(s => s._inSelection);
       for (let i = 0; i < this.wordSpans.length; i++) {
         this.wordSpans[i].dataset.wordIndex = i;
+        delete this.wordSpans[i]._inSelection;
       }
-      this._selectionRange = null;
+      this._selectedTextNodes = null;
     }
 
     this._detectBlockBreaks();
@@ -205,6 +219,7 @@ class Highlighter {
           span.className = 'tts-word';
           span.dataset.wordIndex = this.wordSpans.length;
           span.textContent = part;
+          if (self._selectedTextNodes?.has(textNode)) span._inSelection = true;
           this.wordSpans.push(span);
           fragment.appendChild(span);
         }

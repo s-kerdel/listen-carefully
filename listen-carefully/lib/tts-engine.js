@@ -14,6 +14,7 @@ class TTSEngine {
     this.queue = [];
     this.currentIndex = -1;
     this._activeSpeech = null;
+    this._browserFailCount = 0;
     this.state = 'stopped'; // 'stopped' | 'playing' | 'paused'
     this.voices = [];
     this.settings = {
@@ -57,16 +58,6 @@ class TTSEngine {
 
   getVoices() {
     return this.voices;
-  }
-
-  getVoicesGroupedByLang() {
-    const groups = {};
-    for (const voice of this.voices) {
-      const lang = voice.lang;
-      if (!groups[lang]) groups[lang] = [];
-      groups[lang].push(voice);
-    }
-    return groups;
   }
 
   _findVoice(uri) {
@@ -141,18 +132,6 @@ class TTSEngine {
     this._kokoroFailCount = 0;
     this._browserFailCount = 0;
     this._settingsChangedWhilePaused = false;
-    this._setState('playing');
-    this._speakNext();
-  }
-
-  /**
-   * Resume from a specific sentence index (used for skip).
-   */
-  playFromIndex(sentences, index) {
-    this._cancelAll();
-    this.queue = sentences;
-    this.currentIndex = index - 1;
-    this._kokoroFailCount = 0;
     this._setState('playing');
     this._speakNext();
   }
@@ -290,7 +269,7 @@ class TTSEngine {
       console.warn('TTS utterance error:', event.error);
       if (this._activeSpeech !== utterance) return;
       // Real error: skip to next sentence, or stop after 3 consecutive failures
-      this._browserFailCount = (this._browserFailCount || 0) + 1;
+      this._browserFailCount++;
       if (this._browserFailCount >= 3) {
         if (this.onError) this.onError('Speech synthesis failed. Try a different voice.');
         this.stop();
@@ -448,7 +427,7 @@ class TTSEngine {
   _buildWordTimestamps(allTimestamps) {
     if (allTimestamps.length === 0 || this._wordPositions.length === 0) return [];
 
-    const apiWords = allTimestamps.filter(t => /\w/.test(t.word));
+    const apiWords = allTimestamps.filter(t => typeof t.word === 'string' && /\w/.test(t.word));
     if (apiWords.length === 0) return [];
 
     const text = this.queue[this.currentIndex];
