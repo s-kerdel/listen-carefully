@@ -125,7 +125,7 @@
   }
 
   function saveSettings(partial) {
-    chrome.storage.local.set(partial);
+    safeSave(partial);
     sendToTab({ type: 'updateSettings', settings: partial });
   }
 

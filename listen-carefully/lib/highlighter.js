@@ -261,6 +261,7 @@ class Highlighter {
    */
   _getVisualLineSpans(wordIndex) {
     const span = this.wordSpans[wordIndex];
+    if (!span.isConnected) return [span];
     const rect = span.getBoundingClientRect();
     const top = rect.top;
     const tolerance = rect.height * 0.5;
@@ -371,7 +372,7 @@ class Highlighter {
   }
 
   _scrollToSpan(span) {
-    if (!this.settings.autoScroll) return;
+    if (!this.settings.autoScroll || !span.isConnected) return;
     const rect = span.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
 

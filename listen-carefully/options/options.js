@@ -53,7 +53,7 @@
 
   let hideTimeout;
   function save(partial) {
-    chrome.storage.local.set(partial);
+    safeSave(partial);
     els.savedMsg.classList.add('visible');
     clearTimeout(hideTimeout);
     hideTimeout = setTimeout(() => els.savedMsg.classList.remove('visible'), 3000);

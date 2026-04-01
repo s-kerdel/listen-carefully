@@ -530,10 +530,14 @@ class TTSEngine {
   _stopKokoroPlayback() {
     this._clearWordTimer();
     if (this._audio) {
-      this._audio.pause();
-      this._audio.removeAttribute('src');
-      this._audio.load();
+      const a = this._audio;
       this._audio = null;
+      a.onended = null;
+      a.onerror = null;
+      a.onloadedmetadata = null;
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
     }
     this._revokeBlobUrl();
   }

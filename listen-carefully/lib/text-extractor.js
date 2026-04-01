@@ -21,9 +21,10 @@ function findMainContent() {
   ].join(', '))];
 
   if (candidates.length > 0) {
-    return candidates.reduce((best, el) =>
-      (el.innerText || '').length > (best.innerText || '').length ? el : best
+    const best = candidates.reduce((a, b) =>
+      (b.innerText || '').length > (a.innerText || '').length ? b : a
     );
+    return _expandForHeading(best);
   }
 
   // Fallback: score block-level elements by text density
@@ -46,7 +47,22 @@ function findMainContent() {
     }
   }
 
-  return bestScore > 0 ? best : document.body;
+  return bestScore > 0 ? _expandForHeading(best) : document.body;
+}
+
+/**
+ * If `el` has a heading sibling immediately before it, expand to the parent
+ * so the title is included in the reading range.
+ */
+function _expandForHeading(el) {
+  if (!el || el === document.body) return el;
+  let prev = el.previousElementSibling;
+  // Skip whitespace-only or invisible elements
+  while (prev && !(prev.innerText || '').trim()) prev = prev.previousElementSibling;
+  if (prev && (/^H[1-3]$/.test(prev.tagName) || prev.querySelector('h1, h2, h3'))) {
+    return el.parentElement || el;
+  }
+  return el;
 }
 
 /**
@@ -59,7 +75,7 @@ function findContainerFor(el) {
   const semantic = el.closest(
     'article, main, section, [role="main"], [role="article"]'
   );
-  if (semantic) return semantic;
+  if (semantic) return _expandForHeading(semantic);
 
   // 2. findMainContent() - but only useful if it contains el
   const main = findMainContent();

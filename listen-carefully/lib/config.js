@@ -24,13 +24,13 @@ const SETTINGS_DEFAULTS = {
 };
 
 const SKIP_SELECTORS = [
-  'nav', 'header', 'footer', 'aside',
+  'nav', 'body > header', 'body > div > header', 'footer', 'aside',
   '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
   '[role="complementary"]', '.sidebar', '.nav', '.menu',
   '.advertisement', '.ad', '.ads', '.social-share',
   '.comments', '.comment-section', '#comments',
   'script', 'style', 'noscript', 'svg', 'canvas',
-  'iframe', 'form', 'button', 'input', 'select', 'textarea',
+  'iframe', 'form', 'input', 'select', 'textarea',
   '.sr-only', '.visually-hidden', '.screen-reader-text',
   '[aria-hidden="true"]',
 ];
@@ -50,4 +50,14 @@ function formatKokoroVoice(id) {
   if (!name) return id;
   const pretty = name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
   return `${pretty} - ${KOKORO_GENDERS[id[1]]} (${KOKORO_LANGS[id[0]]})`;
+}
+
+/** Wrapper around chrome.storage.local.set that logs quota errors. */
+function safeSave(partial, callback) {
+  chrome.storage.local.set(partial, () => {
+    if (chrome.runtime.lastError) {
+      console.warn('Storage save failed:', chrome.runtime.lastError.message);
+    }
+    if (callback) callback();
+  });
 }

@@ -72,24 +72,26 @@
 
   function loadSettings() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(SETTINGS_DEFAULTS, (settings) => {
-        engine.updateSettings({
-          voiceURI: settings.voiceURI,
-          rate: settings.rate,
-          pitch: settings.pitch,
-          volume: settings.volume,
-          ttsBackend: settings.ttsBackend,
-          kokoroEndpoint: settings.kokoroEndpoint,
-          kokoroVoice: settings.kokoroVoice,
+      try {
+        chrome.storage.local.get(SETTINGS_DEFAULTS, (settings) => {
+          engine.updateSettings({
+            voiceURI: settings.voiceURI,
+            rate: settings.rate,
+            pitch: settings.pitch,
+            volume: settings.volume,
+            ttsBackend: settings.ttsBackend,
+            kokoroEndpoint: settings.kokoroEndpoint,
+            kokoroVoice: settings.kokoroVoice,
+          });
+          highlighter.updateSettings({
+            highlightBg: settings.highlightBg,
+            highlightFg: settings.highlightFg,
+            neonHighlight: settings.neonHighlight,
+            autoScroll: settings.autoScroll,
+          });
+          resolve(settings);
         });
-        highlighter.updateSettings({
-          highlightBg: settings.highlightBg,
-          highlightFg: settings.highlightFg,
-          neonHighlight: settings.neonHighlight,
-          autoScroll: settings.autoScroll,
-        });
-        resolve(settings);
-      });
+      } catch { resolve(SETTINGS_DEFAULTS); }
     });
   }
 
@@ -101,6 +103,8 @@
       // "tools" still get read.
       selectors.push('pre', 'code:has(span.line)');
     }
+    if (settings.skipAltText) selectors.push('figcaption');
+    if (settings.skipLinks) selectors.push('a[href]');
     return selectors;
   }
 
@@ -336,6 +340,7 @@
     // Alt+P - Play / Pause
     if (!e.shiftKey && e.code === 'KeyP') {
       e.preventDefault();
+      e.stopPropagation();
       if (engine.state === 'stopped') startReading();
       else engine.togglePlayPause();
       return;
@@ -344,6 +349,7 @@
     // Alt+R - Full Page Read
     if (!e.shiftKey && e.code === 'KeyR') {
       e.preventDefault();
+      e.stopPropagation();
       engine.stop();
       startReading('fullpage');
       return;
@@ -352,6 +358,7 @@
     // Alt+S - Stop
     if (!e.shiftKey && e.code === 'KeyS') {
       e.preventDefault();
+      e.stopPropagation();
       engine.stop();
       return;
     }
@@ -362,28 +369,32 @@
     switch (e.code) {
       case 'ArrowRight':
         e.preventDefault();
+        e.stopPropagation();
         engine.skipNext();
         break;
 
       case 'ArrowLeft':
         e.preventDefault();
+        e.stopPropagation();
         engine.skipPrev();
         break;
 
       case 'ArrowUp': {
         e.preventDefault();
+        e.stopPropagation();
         const up = Math.round(Math.min(3.0, engine.settings.rate + 0.1) * 10) / 10;
         engine.updateSettings({ rate: up });
-        chrome.storage.local.set({ rate: up });
+        safeSave({ rate: up });
         sendMsg({ type: 'settingChanged', key: 'rate', value: up });
         break;
       }
 
       case 'ArrowDown': {
         e.preventDefault();
+        e.stopPropagation();
         const down = Math.round(Math.max(0.5, engine.settings.rate - 0.1) * 10) / 10;
         engine.updateSettings({ rate: down });
-        chrome.storage.local.set({ rate: down });
+        safeSave({ rate: down });
         sendMsg({ type: 'settingChanged', key: 'rate', value: down });
         break;
       }

@@ -27,12 +27,15 @@ async function probeTheme() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || tab.url?.startsWith('chrome://')) return;
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-    });
+    const [result] = await Promise.race([
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+    ]);
     if (result?.result !== undefined) setIconTheme(result.result);
-  } catch { /* tab not scriptable - keep default (dark) icon */ }
+  } catch { /* tab not scriptable or timed out - keep default icon */ }
 }
 probeTheme();
 
