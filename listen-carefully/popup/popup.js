@@ -224,7 +224,7 @@
 
   let rateDebounce;
   els.rate.addEventListener('input', () => {
-    const rate = parseFloat(els.rate.value);
+    const rate = Math.max(0.5, Math.min(3.0, parseFloat(els.rate.value)));
     els.rateValue.textContent = rate.toFixed(1) + 'x';
     clearTimeout(rateDebounce);
     rateDebounce = setTimeout(() => saveSettings({ rate }), 100);
@@ -232,7 +232,7 @@
 
   let volumeDebounce;
   els.volume.addEventListener('input', () => {
-    const volume = parseFloat(els.volume.value);
+    const volume = Math.max(0, Math.min(1.0, parseFloat(els.volume.value)));
     els.volumeValue.textContent = Math.round(volume * 100) + '%';
     clearTimeout(volumeDebounce);
     volumeDebounce = setTimeout(() => saveSettings({ volume }), 100);

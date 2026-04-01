@@ -8,6 +8,8 @@
  * so it passes through sendResponse without serialization issues.
  */
 
+importScripts('lib/config.js');
+
 // --- Theme-aware icon ---
 
 function setIconTheme(isDark) {
@@ -57,15 +59,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // --- Kokoro TTS proxy ---
 
-/** Only allow requests to loopback addresses. */
-function isLocalhostURL(urlStr) {
-  try {
-    const url = new URL(urlStr);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  } catch {
-    return false;
-  }
-}
+// isLocalhostURL loaded from lib/config.js
 
 async function handleKokoroTTS(msg) {
   const endpoint = (msg.endpoint || 'http://localhost:8880').replace(/\/+$/, '');

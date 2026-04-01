@@ -18,6 +18,7 @@
   const highlighter = new Highlighter();
 
   let sentences = [];
+  let _lastSelectionRange = null;
 
   // Safe message sender - silently ignores errors when popup/background is closed
   function sendMsg(msg) {
@@ -130,6 +131,19 @@
 
     // Build sentences directly from spans - word counts are guaranteed to match
     sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+    if (sentences.length === 0 && !range) {
+      // Fullpage mode: retry without skip selectors, then with document.body
+      highlighter.cleanup();
+      highlighter.focusMode = fm;
+      highlighter.prepare(container, [], null);
+      sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+      if (sentences.length === 0 && container !== document.body) {
+        highlighter.cleanup();
+        highlighter.focusMode = fm;
+        highlighter.prepare(document.body, skipSelectors, null);
+        sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+      }
+    }
     if (sentences.length === 0) {
       highlighter.cleanup();
       sendMsg({ type: 'stateChanged', state: 'stopped' });
@@ -155,15 +169,20 @@
     let selectionRange = null;
 
     if (mode === 'selection') {
+      // Use saved selection if the live one was lost (e.g. popup stole focus)
       const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) {
+      if ((!selection || selection.isCollapsed) && _lastSelectionRange) {
+        selectionRange = _lastSelectionRange;
+      } else if (selection && !selection.isCollapsed) {
+        selectionRange = selection.getRangeAt(0);
+        _lastSelectionRange = selectionRange.cloneRange();
+      } else {
         sendMsg({ type: 'error', message: 'No text selected. Select some text first.' });
         return;
       }
-      selectionRange = selection.getRangeAt(0);
+      // Use commonAncestor as container — guarantees it contains the full selection
       const ancestor = selectionRange.commonAncestorContainer;
-      const selectionEl = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
-      container = findContainerFor(selectionEl);
+      container = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
     } else {
       container = findMainContent();
     }
@@ -446,7 +465,6 @@
   // --- Cleanup on page unload ---
 
   window.addEventListener('beforeunload', () => {
-    engine.stop();
-    highlighter.cleanup();
+    try { engine.stop(); highlighter.cleanup(); } catch {}
   });
 })();

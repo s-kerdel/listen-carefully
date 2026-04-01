@@ -9,10 +9,13 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 1. **Word-level highlighting.** The currently spoken word is highlighted directly on the page with configurable colors and an optional neon glow effect.
 2. **Multiple reading modes.** Full page, selected text, pick a section, or read from a specific point on the page.
 3. **Focus mode.** Dims the surrounding text to show only the active sentence or line, designed for users who benefit from reduced visual noise.
-4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse.
+4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse. Shortcuts use `stopPropagation` to prevent conflicts with site access keys.
 5. **Voice selection.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language.
 6. **Kokoro TTS support.** Optionally connect to a local [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server for higher quality voices with word-level timestamps. Supports 67 voices across 9 languages. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
-7. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro backend communicates only with a localhost service.
+7. **Smart content detection.** Automatically finds article titles even when they sit outside the content container. Expands to include heading siblings and falls back to broader containers when skip selectors filter out all text.
+8. **Precise selection mode.** Selected text mode trims words at the exact selection boundary, and preserves the selection range if the popup steals focus.
+9. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro backend communicates only with a localhost service.
+10. **Local file support.** Can read local HTML and text files when "Allow access to file URLs" is enabled in the browser's extension settings.
 
 ## Installation
 
@@ -77,8 +80,8 @@ Click the extension icon in the toolbar to open the control panel. Select a read
 
 | Mode           | Description                                                    |
 |----------------|----------------------------------------------------------------|
-| Full Page      | Reads the main content of the page, skipping navigation and ads. |
-| Selected Text  | Reads only the text you have selected on the page.             |
+| Full Page      | Reads the main content of the page, skipping navigation and ads. Falls back to broader containers if no text is found. |
+| Selected Text  | Reads only the text you have selected on the page. Precisely trims to the selection boundary. |
 | Pick Section   | Click any element on the page to read that section.            |
 | Read From Here | Click a starting point and read to the end of the content. Works on any page layout. |
 
@@ -90,7 +93,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, alt text, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
+Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
 
 ## Technical documentation
 
@@ -110,7 +113,21 @@ By submitting a contribution, you agree that your changes are provided under the
 
 ## Privacy
 
-Listen Carefully does not collect, store, or transmit any user data to external servers. All settings are stored locally on your device. No telemetry or analytics are included. The optional Kokoro backend communicates only with a localhost service on your own machine and requires an explicit permission grant.
+Listen Carefully does not collect, store, or transmit any user data to external servers. All settings are stored locally on your device using `chrome.storage.local`. No telemetry, analytics, or tracking are included.
+
+**What the extension accesses:**
+- **Page content:** the extension reads the text content of the active page to convert it to speech. This text is processed entirely within your browser and is never sent to any external server.
+- **Local storage:** user preferences (voice, speed, colors, etc.) are stored locally on your device.
+- **Optional localhost access:** when the Kokoro TTS backend is enabled, the extension communicates with a local server on your machine (`localhost`). This requires an explicit permission grant and no data leaves your device.
+
+**What the extension does NOT do:**
+- Collect or transmit personal data.
+- Track browsing history or behavior.
+- Send page content to external servers.
+- Use cookies, fingerprinting, or analytics.
+- Access any remote servers (unless the operating system's speech synthesis voices connect to cloud services, which is outside this extension's control).
+
+**Content script injection:** the extension injects content scripts into web pages (`http://`, `https://`, and optionally `file://` URLs) to enable text-to-speech functionality. These scripts run in an isolated context and only interact with the page DOM for text extraction and word highlighting. No data is extracted beyond what is needed for speech synthesis on the current page.
 
 The full privacy policy is available at [listen.powertologic.com](https://listen.powertologic.com) and on the Chrome Web Store listing.
 

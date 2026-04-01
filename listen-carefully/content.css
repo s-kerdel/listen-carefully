@@ -1,15 +1,15 @@
 /* Listen Carefully - content script styles */
 
 .tts-word {
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
   border-radius: 3px;
   padding: 0 3px;
   margin: 0 -1px;
 }
 
-/* When reading: dim all words */
+/* Focus mode: dim all words, fade transition only when dimming is active */
 .tts-reading .tts-word {
   opacity: 0.2;
+  transition: opacity 0.2s ease;
 }
 
 /* Current sentence: fully visible */
@@ -17,9 +17,10 @@
   opacity: 1;
 }
 
-/* Current word: highlighted within the visible sentence */
+/* Current word: highlighted — transition only on this single element */
 .tts-word-active {
   opacity: 1 !important;
   background-color: #FFEB3B;
   color: #000000;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }

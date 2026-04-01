@@ -54,6 +54,11 @@
   let hideTimeout;
   function save(partial) {
     safeSave(partial);
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        chrome.tabs.sendMessage(tab.id, { type: 'updateSettings', settings: partial }).catch(() => {});
+      }
+    });
     els.savedMsg.classList.add('visible');
     clearTimeout(hideTimeout);
     hideTimeout = setTimeout(() => els.savedMsg.classList.remove('visible'), 3000);
@@ -267,14 +272,7 @@
   });
   els.kokoroVoice.addEventListener('change', () => saveKokoroSetting('kokoroVoice', els.kokoroVoice));
 
-  function isLocalhostURL(urlStr) {
-    try {
-      const url = new URL(urlStr);
-      return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    } catch {
-      return false;
-    }
-  }
+  // isLocalhostURL loaded from lib/config.js
 
   els.btnTestKokoro.addEventListener('click', async () => {
     const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');

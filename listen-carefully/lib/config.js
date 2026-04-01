@@ -26,7 +26,7 @@ const SETTINGS_DEFAULTS = {
 const SKIP_SELECTORS = [
   'nav', 'body > header', 'body > div > header', 'footer', 'aside',
   '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-  '[role="complementary"]', '.sidebar', '.nav', '.menu',
+  '[role="complementary"]', '.sidebar', '.sidebar-buttons', '.nav', '.menu',
   '.advertisement', '.ad', '.ads', '.social-share',
   '.comments', '.comment-section', '#comments',
   'script', 'style', 'noscript', 'svg', 'canvas',
@@ -50,6 +50,16 @@ function formatKokoroVoice(id) {
   if (!name) return id;
   const pretty = name.replace(/^v0/, '').replace(/^./, c => c.toUpperCase()) || id;
   return `${pretty} - ${KOKORO_GENDERS[id[1]]} (${KOKORO_LANGS[id[0]]})`;
+}
+
+/** Check if a URL points to a loopback address (localhost, 127.0.0.1, ::1). */
+function isLocalhostURL(urlStr) {
+  try {
+    const url = new URL(urlStr);
+    return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 /** Wrapper around chrome.storage.local.set that logs quota errors. */

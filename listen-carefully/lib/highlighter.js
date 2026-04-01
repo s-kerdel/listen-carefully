@@ -77,9 +77,21 @@ class Highlighter {
     // Selection mode: collect text nodes that intersect the range BEFORE
     // wrapping, because _wrapWords replaces text nodes with spans which
     // detaches the range's references and breaks intersectsNode.
+    // Also record char offsets for boundary nodes so we can trim partial words.
     this._selectedTextNodes = null;
+    this._selectionStartNode = null;
+    this._selectionStartOffset = 0;
+    this._selectionEndNode = null;
+    this._selectionEndOffset = Infinity;
     if (range) {
       this._selectedTextNodes = new Set();
+      const startNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer : null;
+      const endNode = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer : null;
+      this._selectionStartNode = startNode;
+      this._selectionStartOffset = range.startOffset;
+      this._selectionEndNode = endNode;
+      this._selectionEndOffset = range.endOffset;
+
       const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
       while (tw.nextNode()) {
         if (range.intersectsNode(tw.currentNode)) {
@@ -145,11 +157,20 @@ class Highlighter {
 
       if (isLastSpan || isBlockBreak || endsWithPunctuation) {
         const text = currentWords.join(' ');
+        // Pre-compute char offset for each word so highlightWord() is O(1)
+        const charOffsets = [];
+        let pos = 0;
+        for (const w of currentWords) {
+          const idx = text.indexOf(w, pos);
+          charOffsets.push(idx);
+          pos = idx + w.length;
+        }
         sentences.push(text);
         this.sentenceMap.push({
           startWordIndex: startIdx,
           wordCount: currentWords.length,
-          text: text,
+          text,
+          charOffsets,
         });
         startIdx = i + 1;
         currentWords = [];
@@ -210,7 +231,9 @@ class Highlighter {
 
       const fragment = document.createDocumentFragment();
       const parts = text.split(/(\s+)/);
+      const inSelection = self._selectedTextNodes?.has(textNode);
 
+      let charPos = 0; // track position within textNode
       for (const part of parts) {
         if (/^\s+$/.test(part) || part === '') {
           fragment.appendChild(document.createTextNode(part));
@@ -219,10 +242,16 @@ class Highlighter {
           span.className = 'tts-word';
           span.dataset.wordIndex = this.wordSpans.length;
           span.textContent = part;
-          if (self._selectedTextNodes?.has(textNode)) span._inSelection = true;
+          if (inSelection) {
+            const wordEnd = charPos + part.length;
+            const afterStart = textNode !== self._selectionStartNode || wordEnd > self._selectionStartOffset;
+            const beforeEnd = textNode !== self._selectionEndNode || charPos < self._selectionEndOffset;
+            if (afterStart && beforeEnd) span._inSelection = true;
+          }
           this.wordSpans.push(span);
           fragment.appendChild(span);
         }
+        charPos += part.length;
       }
 
       parent.replaceChild(fragment, textNode);
@@ -297,19 +326,16 @@ class Highlighter {
     if (!this.isActive || sentenceIndex >= this.sentenceMap.length) return;
 
     const info = this.sentenceMap[sentenceIndex];
-    const sentenceText = info.text;
+    const offsets = info.charOffsets;
 
-    const words = sentenceText.split(/\s+/).filter(w => w.length > 0);
-    let offset = 0;
+    // Binary-style scan using pre-computed char offsets — O(n) worst case
+    // but typically exits early, and avoids repeated indexOf/split per call
     let wordIndexInSentence = -1;
-
-    for (let i = 0; i < words.length; i++) {
-      const wordStart = sentenceText.indexOf(words[i], offset);
-      if (charIndex >= wordStart && charIndex < wordStart + words[i].length) {
+    for (let i = offsets.length - 1; i >= 0; i--) {
+      if (offsets[i] >= 0 && charIndex >= offsets[i]) {
         wordIndexInSentence = i;
         break;
       }
-      offset = wordStart + words[i].length;
     }
 
     if (wordIndexInSentence < 0) {
@@ -317,8 +343,7 @@ class Highlighter {
       return;
     }
 
-    const globalWordIndex = info.startWordIndex + wordIndexInSentence;
-    this._applyHighlight(globalWordIndex);
+    this._applyHighlight(info.startWordIndex + wordIndexInSentence);
   }
 
   _applyHighlight(wordIndex) {

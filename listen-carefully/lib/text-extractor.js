@@ -24,7 +24,7 @@ function findMainContent() {
     const best = candidates.reduce((a, b) =>
       (b.innerText || '').length > (a.innerText || '').length ? b : a
     );
-    return _expandForHeading(best);
+    if ((best.innerText || '').trim().length > 0) return _expandForHeading(best);
   }
 
   // Fallback: score block-level elements by text density
@@ -33,9 +33,10 @@ function findMainContent() {
   let bestScore = 0;
 
   for (const block of blocks) {
-    const text = block.innerText || '';
+    // textContent avoids layout reflow (innerText forces it per element)
+    const text = block.textContent || '';
     const linkText = Array.from(block.querySelectorAll('a'))
-      .reduce((sum, a) => sum + (a.innerText || '').length, 0);
+      .reduce((sum, a) => sum + (a.textContent || '').length, 0);
 
     const textLen = text.length;
     if (textLen < 150) continue;
@@ -58,7 +59,7 @@ function _expandForHeading(el) {
   if (!el || el === document.body) return el;
   let prev = el.previousElementSibling;
   // Skip whitespace-only or invisible elements
-  while (prev && !(prev.innerText || '').trim()) prev = prev.previousElementSibling;
+  while (prev && !(prev.textContent || '').trim()) prev = prev.previousElementSibling;
   if (prev && (/^H[1-3]$/.test(prev.tagName) || prev.querySelector('h1, h2, h3'))) {
     return el.parentElement || el;
   }
@@ -86,7 +87,7 @@ function findContainerFor(el) {
   let best = null;
   let current = el.parentElement;
   while (current && current !== document.body && current !== document.documentElement) {
-    if ((current.innerText || '').length >= 100) {
+    if ((current.textContent || '').length >= 100) {
       best = current;
     }
     current = current.parentElement;

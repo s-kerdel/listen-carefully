@@ -168,11 +168,24 @@ class TTSEngine {
 
     this._setState('playing');
 
-    if (this._isKokoro && this._audio) {
-      this._audio.play();
-      this._resumeWordTimer();
+    if (this._isKokoro) {
+      if (this._audio) {
+        this._audio.play();
+        this._resumeWordTimer();
+      } else {
+        // Audio finished while paused — advance to next sentence
+        this._speakNext();
+      }
     } else {
       speechSynthesis.resume();
+      // Utterance may have finished while paused — if so, resume does nothing.
+      // Detect this: if speechSynthesis is no longer speaking/pending after a
+      // short tick, the utterance ended during pause and we need to advance.
+      setTimeout(() => {
+        if (this.state === 'playing' && !speechSynthesis.speaking && !speechSynthesis.pending) {
+          this._speakNext();
+        }
+      }, 100);
     }
   }
 
@@ -203,12 +216,12 @@ class TTSEngine {
   }
 
   skipPrev() {
-    if (this.currentIndex > 0) {
-      this._cancelAll();
-      this.currentIndex -= 2; // -2 because _speakNext increments by 1
-      this._setState('playing');
-      this._speakNext();
-    }
+    if (this.queue.length === 0) return;
+    this._cancelAll();
+    // Go to previous sentence, or restart current if already on the first
+    this.currentIndex = Math.max(-1, this.currentIndex - 2);
+    this._setState('playing');
+    this._speakNext();
   }
 
   getCurrentSentenceIndex() {
@@ -379,7 +392,8 @@ class TTSEngine {
         this._handleKokoroFailure();
       };
 
-      audio.play().catch(() => {
+      audio.play().catch((err) => {
+        console.warn('Kokoro audio play failed:', err.message);
         if (this._audio !== audio) return;
         this._clearWordTimer();
         this._revokeBlobUrl();
@@ -486,12 +500,12 @@ class TTSEngine {
       if (!this._audio || this.state !== 'playing') return;
 
       const t = this._audio.currentTime;
+      const ts = this._wordTimestamps;
 
-      // Find the last word whose start_time <= currentTime
-      let idx = 0;
-      for (let i = this._wordTimestamps.length - 1; i >= 0; i--) {
-        if (t >= this._wordTimestamps[i]) { idx = i; break; }
-      }
+      // Forward scan from last position — audio time only moves forward,
+      // so we never need to re-check earlier timestamps
+      let idx = Math.max(0, this._lastHighlightedIdx);
+      while (idx + 1 < ts.length && t >= ts[idx + 1]) idx++;
 
       if (idx !== this._lastHighlightedIdx && idx < this._wordPositions.length) {
         this._lastHighlightedIdx = idx;
