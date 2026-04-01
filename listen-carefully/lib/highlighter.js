@@ -395,13 +395,15 @@ class Highlighter {
     if (this.container) this.container.classList.remove('tts-reading');
 
     const allSpans = document.querySelectorAll('.tts-word');
+    const parents = new Set();
     for (const span of allSpans) {
       const parent = span.parentNode;
       if (parent) {
         parent.replaceChild(document.createTextNode(span.textContent), span);
-        parent.normalize();
+        parents.add(parent);
       }
     }
+    for (const p of parents) p.normalize();
 
     this.wordSpans = [];
     this.blockBreaks = new Set();

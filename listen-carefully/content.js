@@ -191,9 +191,7 @@
       selectionRange = selection.getRangeAt(0);
       const ancestor = selectionRange.commonAncestorContainer;
       const selectionEl = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
-      container = selectionEl.closest('article, main, section, [role="main"]')
-        || extractor.findMainContent()
-        || selectionEl;
+      container = extractor.findContainerFor(selectionEl);
     } else {
       container = extractor.findMainContent();
     }
@@ -206,7 +204,12 @@
     startPlayback(container, settings, selectionRange);
   }
 
+  let _activePickerCleanup = null;
+
   function startElementPicker(settings, mode) {
+    // Cancel any previous picker to prevent stacking click listeners
+    if (_activePickerCleanup) _activePickerCleanup();
+
     document.body.style.cursor = 'crosshair';
     sendMsg({ type: 'stateChanged', state: 'picking' });
 
@@ -215,27 +218,41 @@
       e.stopPropagation();
       document.removeEventListener('click', onClick, true);
       document.body.style.cursor = '';
+      _activePickerCleanup = null;
 
       try {
         const s = settings || await loadSettings();
 
-        const container = e.target.closest('article, main, section, [role="main"]')
-          || extractor.findMainContent();
+        const container = extractor.findContainerFor(e.target);
         if (!container) {
           sendMsg({ type: 'error', message: 'No readable text found on this page.' });
           return;
         }
         const range = document.createRange();
-        range.setStartBefore(e.target);
+        if (container.contains(e.target)) {
+          range.setStartBefore(e.target);
+        } else {
+          range.setStart(container, 0);
+        }
         if (mode === 'readfromhere') {
           range.setEndAfter(container.lastChild || container);
         } else {
-          range.setEndAfter(e.target);
+          if (container.contains(e.target)) {
+            range.setEndAfter(e.target);
+          } else {
+            range.setEndAfter(container.lastChild || container);
+          }
         }
         startPlayback(container, s, range);
       } catch (err) {
         sendMsg({ type: 'error', message: 'Failed to start reading.' });
       }
+    };
+
+    _activePickerCleanup = () => {
+      document.removeEventListener('click', onClick, true);
+      document.body.style.cursor = '';
+      _activePickerCleanup = null;
     };
 
     document.addEventListener('click', onClick, true);
@@ -251,17 +268,21 @@
         break;
 
       case 'readFromHere': {
-        if (!lastRightClickedEl) break;
+        if (!lastRightClickInfo) break;
         (async () => {
           const s = await loadSettings();
-          const container = lastRightClickedEl.closest('article, main, section, [role="main"]')
-            || extractor.findMainContent();
+          const startEl = resolveClickTarget(lastRightClickInfo);
+          const container = extractor.findContainerFor(startEl);
           if (!container) {
             sendMsg({ type: 'error', message: 'No readable text found on this page.' });
             return;
           }
           const range = document.createRange();
-          range.setStartBefore(lastRightClickedEl);
+          if (container.contains(startEl)) {
+            range.setStartBefore(startEl);
+          } else {
+            range.setStart(container, 0);
+          }
           range.setEndAfter(container.lastChild || container);
           startPlayback(container, s, range);
         })();
@@ -281,8 +302,7 @@
         break;
 
       case 'stop':
-        engine.stop();
-        highlighter.cleanup();
+        engine.stop(); // onEnd callback handles highlighter.cleanup()
         break;
 
       case 'skipNext':
@@ -326,7 +346,8 @@
               msg.settings.kokoroEndpoint || msg.settings.kokoroVoice) {
             engine.updateSettings(msg.settings);
           }
-          if (msg.settings.highlightBg || msg.settings.highlightFg) {
+          if (msg.settings.highlightBg || msg.settings.highlightFg ||
+              msg.settings.neonHighlight !== undefined || msg.settings.autoScroll !== undefined) {
             highlighter.updateSettings(msg.settings);
           }
         }
@@ -353,7 +374,6 @@
     if (!e.shiftKey && e.code === 'KeyR') {
       e.preventDefault();
       engine.stop();
-      highlighter.cleanup();
       startReading('fullpage');
       return;
     }
@@ -362,7 +382,6 @@
     if (!e.shiftKey && e.code === 'KeyS') {
       e.preventDefault();
       engine.stop();
-      highlighter.cleanup();
       return;
     }
 
@@ -402,10 +421,36 @@
 
   // --- Context menu: "Read from here" ---
 
-  let lastRightClickedEl = null;
+  let lastRightClickInfo = null;
   document.addEventListener('contextmenu', (e) => {
-    lastRightClickedEl = e.target;
+    lastRightClickInfo = {
+      target: e.target,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    };
   });
+
+  /**
+   * Resolve a right-click to the nearest text-bearing element.
+   * Uses caret APIs to pinpoint the exact text node under the cursor,
+   * falling back to the raw event target.
+   */
+  function resolveClickTarget(info) {
+    let textNode = null;
+    if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(info.clientX, info.clientY);
+      if (pos?.offsetNode?.nodeType === Node.TEXT_NODE && pos.offsetNode.textContent.trim()) {
+        textNode = pos.offsetNode;
+      }
+    }
+    if (!textNode && document.caretRangeAtPoint) {
+      const range = document.caretRangeAtPoint(info.clientX, info.clientY);
+      if (range?.startContainer?.nodeType === Node.TEXT_NODE && range.startContainer.textContent.trim()) {
+        textNode = range.startContainer;
+      }
+    }
+    return textNode ? (textNode.parentElement || info.target) : info.target;
+  }
 
   // --- Theme-aware icon ---
 

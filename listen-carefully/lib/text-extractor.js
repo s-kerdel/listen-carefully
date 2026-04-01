@@ -71,20 +71,17 @@ class TextExtractor {
    * Finds the element with the most text density.
    */
   findMainContent() {
-    // Try semantic elements first
-    const candidates = [
-      ...document.querySelectorAll('article'),
-      ...document.querySelectorAll('main'),
-      ...document.querySelectorAll('[role="main"]'),
-      ...document.querySelectorAll('[role="article"]'),
-      ...document.querySelectorAll('#content'),
-      ...document.querySelectorAll('.content'),
-      ...document.querySelectorAll('.post-content'),
-      ...document.querySelectorAll('.post'),
-      ...document.querySelectorAll('.article-content'),
-      ...document.querySelectorAll('.entry-content'),
-      ...document.querySelectorAll('.page-content'),
-    ];
+    // Try semantic elements first (broad set of common CMS/framework patterns)
+    const candidates = [...document.querySelectorAll([
+      'article', 'main', '[role="main"]', '[role="article"]',
+      '#content', '.content',
+      '.post-content', '.post', '.post-body',
+      '.article-content', '.article-body',
+      '.entry-content', '.page-content',
+      '.story-body', '.main-content', '#main-content',
+      '#article', '.prose',
+      '[itemprop="articleBody"]',
+    ].join(', '))];
 
     if (candidates.length > 0) {
       // Return the one with the most visible text (innerText respects
@@ -116,6 +113,38 @@ class TextExtractor {
     }
 
     return bestScore > 0 ? best : document.body;
+  }
+
+  /**
+   * Find the best content container that includes the given element.
+   * Used by "read from here" and element picker to ensure the container
+   * actually contains the start point.
+   */
+  findContainerFor(el) {
+    // 1. Semantic container closest to the element
+    const semantic = el.closest(
+      'article, main, section, [role="main"], [role="article"]'
+    );
+    if (semantic) return semantic;
+
+    // 2. findMainContent() - but only useful if it contains el
+    const main = this.findMainContent();
+    if (main && main !== document.body && main.contains(el)) return main;
+
+    // 3. Walk up from el to find the broadest block-level ancestor with
+    //    substantial text (stop before body which is too broad)
+    let best = null;
+    let current = el.parentElement;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if ((current.innerText || '').length >= 100) {
+        best = current;
+      }
+      current = current.parentElement;
+    }
+    if (best) return best;
+
+    // 4. Last resort: use main content even without containment
+    return main || document.body;
   }
 
   _getTextFromElement(element) {

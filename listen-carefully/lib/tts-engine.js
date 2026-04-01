@@ -13,9 +13,8 @@ class TTSEngine {
   constructor() {
     this.queue = [];
     this.currentIndex = -1;
-    this.currentUtterance = null;
+    this._activeSpeech = null;
     this.state = 'stopped'; // 'stopped' | 'playing' | 'paused'
-    this._skipping = false; // Guards against cancel() triggering onend during skip
     this.voices = [];
     this.settings = {
       voiceURI: null,
@@ -77,9 +76,10 @@ class TTSEngine {
   /** Cancel both backends - safe to call regardless of active backend. */
   _cancelAll() {
     this._stopKokoroPlayback();
-    this._skipping = true;
+    // Clear active speech BEFORE cancel() so stale onend events
+    // (fired sync on Firefox, async on Chrome) are ignored.
+    this._activeSpeech = null;
     speechSynthesis.cancel();
-    this._skipping = false;
   }
 
   /**
@@ -93,15 +93,16 @@ class TTSEngine {
 
   updateSettings(settings) {
     const wasPlaying = this.state === 'playing';
-    const prevRate = this.settings.rate;
-    const prevVoice = this.settings.kokoroVoice;
-    const prevEndpoint = this.settings.kokoroEndpoint;
-    const prevBackend = this.settings.ttsBackend;
+    const prev = { ...this.settings };
 
     // Allowlist keys to prevent prototype pollution
     for (const k of TTSEngine._SETTINGS_KEYS) {
       if (k in settings) this.settings[k] = settings[k];
     }
+
+    // Check if anything actually changed
+    const changed = TTSEngine._SETTINGS_KEYS.some(k => this.settings[k] !== prev[k]);
+    if (!changed) return;
 
     if (this.state === 'paused') {
       this._settingsChangedWhilePaused = true;
@@ -112,10 +113,10 @@ class TTSEngine {
       // Kokoro: volume is client-side, update instantly without re-fetching
       if (this._isKokoro && this._audio) {
         this._audio.volume = this.settings.volume;
-        const needsRefetch = this.settings.rate !== prevRate
-          || this.settings.kokoroVoice !== prevVoice
-          || this.settings.kokoroEndpoint !== prevEndpoint
-          || this.settings.ttsBackend !== prevBackend;
+        const needsRefetch = this.settings.rate !== prev.rate
+          || this.settings.kokoroVoice !== prev.kokoroVoice
+          || this.settings.kokoroEndpoint !== prev.kokoroEndpoint
+          || this.settings.ttsBackend !== prev.ttsBackend;
         if (!needsRefetch) return;
       }
 
@@ -137,8 +138,9 @@ class TTSEngine {
 
     this.queue = sentences;
     this.currentIndex = -1;
-    this.currentUtterance = null;
     this._kokoroFailCount = 0;
+    this._browserFailCount = 0;
+    this._settingsChangedWhilePaused = false;
     this._setState('playing');
     this._speakNext();
   }
@@ -199,7 +201,6 @@ class TTSEngine {
     this._cancelAll();
     this.queue = [];
     this.currentIndex = -1;
-    this.currentUtterance = null;
     this._setState('stopped');
     if (this.onEnd) this.onEnd();
   }
@@ -272,25 +273,33 @@ class TTSEngine {
     const sentenceIndex = this.currentIndex;
 
     utterance.onboundary = (event) => {
-      if (event.name === 'word' && this.onBoundary) {
+      if (event.name === 'word' && this.onBoundary && this._activeSpeech === utterance) {
         this.onBoundary(event.charIndex, event.charLength, sentenceIndex);
       }
     };
 
     utterance.onend = () => {
-      if (this.state === 'playing' && !this._skipping) {
+      if (this._activeSpeech === utterance && this.state === 'playing') {
+        this._browserFailCount = 0;
         this._speakNext();
       }
     };
 
     utterance.onerror = (event) => {
-      // 'interrupted' and 'canceled' are expected during skip/stop
-      if (event.error !== 'interrupted' && event.error !== 'canceled') {
-        console.warn('TTS utterance error:', event.error);
+      if (event.error === 'interrupted' || event.error === 'canceled') return;
+      console.warn('TTS utterance error:', event.error);
+      if (this._activeSpeech !== utterance) return;
+      // Real error: skip to next sentence, or stop after 3 consecutive failures
+      this._browserFailCount = (this._browserFailCount || 0) + 1;
+      if (this._browserFailCount >= 3) {
+        if (this.onError) this.onError('Speech synthesis failed. Try a different voice.');
+        this.stop();
+      } else if (this.state === 'playing') {
+        this._speakNext();
       }
     };
 
-    this.currentUtterance = utterance;
+    this._activeSpeech = utterance;
     if (this.onSentenceStart) this.onSentenceStart(sentenceIndex);
     speechSynthesis.speak(utterance);
   }
@@ -358,6 +367,7 @@ class TTSEngine {
 
       // Fallback: estimate timestamps from audio duration if API provided none
       audio.onloadedmetadata = () => {
+        if (this._audio !== audio) return;
         if (this._wordTimestamps.length === 0 && this._wordPositions.length > 0 && audio.duration > 0) {
           this._wordTimestamps = this._estimateWordTimestamps(audio.duration);
         }
@@ -365,10 +375,14 @@ class TTSEngine {
 
       // Start word sync only when audio actually begins playing
       audio.addEventListener('playing', () => {
-        this._startWordSync(sentenceIndex);
+        if (this._audio === audio) this._startWordSync(sentenceIndex);
       }, { once: true });
 
+      // Guard all callbacks: ignore stale events from a replaced audio element.
+      // _stopKokoroPlayback sets this._audio = null before the old element's
+      // async events fire, so checking identity prevents double-advancing.
       audio.onended = () => {
+        if (this._audio !== audio) return;
         this._clearWordTimer();
         this._revokeBlobUrl();
         this._audio = null;
@@ -378,6 +392,7 @@ class TTSEngine {
       };
 
       audio.onerror = () => {
+        if (this._audio !== audio) return;
         console.warn('Kokoro audio playback error');
         this._clearWordTimer();
         this._revokeBlobUrl();
@@ -386,6 +401,7 @@ class TTSEngine {
       };
 
       audio.play().catch(() => {
+        if (this._audio !== audio) return;
         this._clearWordTimer();
         this._revokeBlobUrl();
         this._audio = null;
