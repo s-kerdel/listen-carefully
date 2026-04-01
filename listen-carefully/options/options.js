@@ -39,6 +39,10 @@
     neonHighlight: document.getElementById('neon-highlight'),
     focusMode: document.getElementById('focus-mode'),
     autoScroll: document.getElementById('auto-scroll'),
+    siteList: document.getElementById('site-list'),
+    siteHostname: document.getElementById('site-hostname'),
+    siteSelector: document.getElementById('site-selector'),
+    btnAddSite: document.getElementById('btn-add-site'),
     savedMsg: document.getElementById('saved-msg'),
   };
 
@@ -200,6 +204,8 @@
     const fm = s.focusMode === true ? 'sentence' : (s.focusMode || 'off');
     els.focusMode.value = fm;
     els.autoScroll.checked = s.autoScroll;
+    _siteSelectors = s.siteSelectors || {};
+    renderSiteSelectors();
     updatePreview();
   });
 
@@ -380,6 +386,43 @@
   els.punctuationPauses.addEventListener('change', () => save({ punctuationPauses: els.punctuationPauses.checked }));
   els.focusMode.addEventListener('change', () => save({ focusMode: els.focusMode.value }));
   els.autoScroll.addEventListener('change', () => save({ autoScroll: els.autoScroll.checked }));
+
+  // --- Site selectors ---
+
+  let _siteSelectors = {};
+
+  function renderSiteSelectors() {
+    els.siteList.replaceChildren();
+    for (const [host, selector] of Object.entries(_siteSelectors)) {
+      const row = document.createElement('div');
+      row.className = 'site-entry';
+      row.innerHTML =
+        `<span class="site-entry-host"></span>` +
+        `<span class="site-entry-selector"></span>` +
+        `<button class="btn-delete" aria-label="Remove ${host}">` +
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
+        `</button>`;
+      row.querySelector('.site-entry-host').textContent = host;
+      row.querySelector('.site-entry-selector').textContent = selector;
+      row.querySelector('.btn-delete').addEventListener('click', () => {
+        delete _siteSelectors[host];
+        save({ siteSelectors: _siteSelectors });
+        renderSiteSelectors();
+      });
+      els.siteList.appendChild(row);
+    }
+  }
+
+  els.btnAddSite.addEventListener('click', () => {
+    const host = els.siteHostname.value.trim().toLowerCase();
+    const selector = els.siteSelector.value.trim();
+    if (!host || !selector) return;
+    _siteSelectors[host] = selector;
+    save({ siteSelectors: _siteSelectors });
+    els.siteHostname.value = '';
+    els.siteSelector.value = '';
+    renderSiteSelectors();
+  });
 
   // --- Voice preview / test playback ---
 

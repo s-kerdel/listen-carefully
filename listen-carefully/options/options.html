@@ -199,6 +199,26 @@
       </div>
     </section>
 
+    <!-- Site Selectors -->
+    <section class="card">
+      <div class="card-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+        <h2>Site Selectors</h2>
+      </div>
+      <div class="card-body">
+        <div class="kokoro-note" role="note">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Override automatic content detection for specific sites. Use a CSS selector to tell the extension exactly which element contains the readable content. Use your browser's DevTools (F12) to find the right selector.
+        </div>
+        <div id="site-list" class="site-list"></div>
+        <div class="site-add-row">
+          <input type="text" id="site-hostname" placeholder="example.com" aria-label="Hostname">
+          <input type="text" id="site-selector" placeholder=".article-body" aria-label="CSS selector">
+          <button id="btn-add-site" class="btn" aria-label="Add site selector">Add</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Keyboard Shortcuts -->
     <section class="card">
       <div class="card-header">

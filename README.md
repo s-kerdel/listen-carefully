@@ -93,7 +93,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active sentence or active line), and auto-scroll toggle. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
+Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active sentence or active line), auto-scroll toggle, and per-site CSS selector overrides for content detection. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
 
 ## Technical documentation
 

@@ -184,7 +184,8 @@
       const ancestor = selectionRange.commonAncestorContainer;
       container = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
     } else {
-      container = findMainContent();
+      const siteSelector = (settings.siteSelectors || {})[location.hostname];
+      container = findMainContent(siteSelector);
     }
 
     if (!container) {
@@ -214,7 +215,8 @@
       try {
         const s = settings || await loadSettings();
 
-        const container = findContainerFor(e.target);
+        const siteSelector = (s.siteSelectors || {})[location.hostname];
+        const container = findContainerFor(e.target, siteSelector);
         if (!container) {
           sendMsg({ type: 'error', message: 'No readable text found on this page.' });
           return;
@@ -263,7 +265,8 @@
         (async () => {
           const s = await loadSettings();
           const startEl = resolveClickTarget(lastRightClickInfo);
-          const container = findContainerFor(startEl);
+          const siteSelector = (s.siteSelectors || {})[location.hostname];
+          const container = findContainerFor(startEl, siteSelector);
           if (!container) {
             sendMsg({ type: 'error', message: 'No readable text found on this page.' });
             return;

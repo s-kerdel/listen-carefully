@@ -102,9 +102,9 @@ The Highlighter's `updateSettings` method uses a key allowlist to prevent stray 
 
 This module provides two standalone functions for finding readable content on a page.
 
-`findMainContent()` identifies the main content area using a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names (`.prose`, `.post-content`, `[itemprop="articleBody"]`, etc.). Empty semantic candidates are skipped so the density fallback can find a better match. If no semantic candidates are found, it falls back to scoring `<div>` and `<section>` elements by text density using `textContent` (avoids layout reflow), penalizing elements with a high ratio of link text. Parents of `<p>` elements are also included in the scoring set so that pages with bare paragraphs (not wrapped in a `<div>` or `<section>`) still get a scored container. Both paths call `_expandForHeading()` which checks if the chosen container has a heading sibling (`<h1>`–`<h3>`, or an element containing one) immediately before it, and if so expands to the parent element so article titles are included in the reading range.
+`findMainContent(siteSelector)` identifies the main content area. If a per-site CSS selector is configured for the current hostname, it is tried first via `document.querySelector()` (wrapped in try/catch for invalid selectors). If it matches, the result is returned immediately, bypassing all heuristics. Otherwise it uses a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names (`.prose`, `.post-content`, `[itemprop="articleBody"]`, etc.). Empty semantic candidates are skipped so the density fallback can find a better match. If no semantic candidates are found, it falls back to scoring `<div>` and `<section>` elements by text density using `textContent` (avoids layout reflow), penalizing elements with a high ratio of link text. Parents of `<p>` elements are also included in the scoring set so that pages with bare paragraphs (not wrapped in a `<div>` or `<section>`) still get a scored container. Both paths call `_expandForHeading()` which checks if the chosen container has a heading sibling (`<h1>`–`<h3>`, or an element containing one) immediately before it, and if so expands to the parent element so article titles are included in the reading range.
 
-`findContainerFor(el)` finds the best content container that includes a given element. This is used by "Read from here" and element picker modes to ensure the container actually contains the starting point. It tries semantic ancestors first (with heading expansion), then checks if `findMainContent()` contains the element, then walks up the DOM to find the broadest block-level ancestor with substantial text.
+`findContainerFor(el, siteSelector)` finds the best content container that includes a given element. Like `findMainContent`, it checks for a per-site CSS selector override first. This is used by "Read from here" and element picker modes to ensure the container actually contains the starting point. It tries semantic ancestors first (with heading expansion), then checks if `findMainContent()` contains the element, then walks up the DOM to find the broadest block-level ancestor with substantial text.
 
 The "Read from here" context menu uses `document.caretPositionFromPoint()` / `document.caretRangeAtPoint()` to resolve the right-click position to the nearest text node, rather than relying on the raw `event.target` which may be a non-text element.
 
@@ -186,6 +186,8 @@ autoScroll        Boolean. Whether to scroll the active word into view.
 ttsBackend        String. One of: browser, kokoro. Default: browser.
 kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
 kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
+siteSelectors     Object. Map of hostname to CSS selector for per-site content
+                  detection overrides. Default: {} (empty).
 ```
 
 Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page.

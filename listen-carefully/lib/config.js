@@ -21,6 +21,7 @@ const SETTINGS_DEFAULTS = {
   ttsBackend: 'browser',
   kokoroEndpoint: 'http://localhost:8880',
   kokoroVoice: 'af_alloy',
+  siteSelectors: {},
 };
 
 const SKIP_SELECTORS = [
