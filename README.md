@@ -80,11 +80,11 @@ Click the extension icon in the toolbar to open the control panel. Select a read
 | Full Page      | Reads the main content of the page, skipping navigation and ads. |
 | Selected Text  | Reads only the text you have selected on the page.             |
 | Pick Section   | Click any element on the page to read that section.            |
-| Read From Here | Click a starting point and read to the end of the content.     |
+| Read From Here | Click a starting point and read to the end of the content. Works on any page layout. |
 
 ### Context menu
 
-Right-click anywhere on a page and select **Read from here** to begin reading from that point.
+Right-click anywhere on a page and select **Read from here** to begin reading from that point. The extension uses the cursor position to find the exact text under your click, so it works reliably even on pages without semantic HTML structure.
 
 ## Settings
 

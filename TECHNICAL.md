@@ -20,11 +20,13 @@ Kokoro fetches are routed through the service worker rather than the content scr
 
 ### 2.2 Content Script Layer
 
-Files: `content.js`, `lib/tts-engine.js`, `lib/highlighter.js`, `lib/text-extractor.js`
+Files: `content.js`, `lib/config.js`, `lib/tts-engine.js`, `lib/highlighter.js`, `lib/text-extractor.js`
 
-These four files are injected into every page via the `content_scripts` manifest entry. They run in an isolated world, meaning they share the page's DOM but not its JavaScript scope. The `speechSynthesis` API is only available in this context, not in the service worker.
+These five files are injected into every page via the `content_scripts` manifest entry. They run in an isolated world, meaning they share the page's DOM but not its JavaScript scope. The `speechSynthesis` API is only available in this context, not in the service worker.
 
-`content.js` is the orchestrator. It instantiates the three library classes, wires up callbacks between them, handles all incoming messages from the popup and background script, registers keyboard shortcuts, and manages the reading lifecycle.
+`lib/config.js` is loaded first and defines shared constants (`SETTINGS_DEFAULTS`, `SKIP_SELECTORS`, Kokoro voice formatting) used by all other scripts. It is also loaded by the popup and options page via `<script>` tags.
+
+`content.js` is the orchestrator. It wires up callbacks between the engine and highlighter, handles all incoming messages from the popup and background script, registers keyboard shortcuts, and manages the reading lifecycle.
 
 ### 2.3 Popup
 
@@ -58,9 +60,11 @@ onEnd()                                              Called when the entire queu
 onError(message)                                     Called when the Kokoro backend fails (e.g. service unreachable).
 ```
 
-The `_skipping` flag is a guard that prevents `speechSynthesis.cancel()` from triggering the `onend` handler during skip and stop operations. The `_cancelAll()` helper cancels both backends defensively, which is safe regardless of which backend is active.
+Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` for Kokoro audio elements). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. All Kokoro audio callbacks (`onended`, `onerror`, `playing`) also check `this._audio === audio` to prevent stale events from a replaced audio element.
 
-Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. For the Kokoro backend, volume changes are applied directly to the `Audio` element without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
+Both backends have error recovery with a 3-strike counter. If a sentence fails, the engine skips to the next. After 3 consecutive failures it stops with an error message. Success resets the counter.
+
+Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If no settings actually changed, the restart is skipped to avoid an audible glitch. For the Kokoro backend, volume changes are applied directly to the `Audio` element without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
 
 #### 3.1.1 Kokoro Word Highlighting
 
@@ -76,13 +80,13 @@ Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$5
 
 Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
 
-Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries. Blob URLs are revoked on all exit paths. Stale async responses are guarded after both `await` points. A 3-strike failure counter stops playback if the Kokoro service is unreachable.
+Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries with type validation on each entry. Blob URLs are revoked on all exit paths. Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
 The Highlighter is the single source of truth for the word list. It performs three operations in sequence:
 
-1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and wraps each word in a `<span class="tts-word">` element. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. If a selection `Range` is provided, only spans whose source text node intersects the range are retained.
+1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and wraps each word in a `<span class="tts-word">` element. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. If a selection `Range` is provided, the Highlighter collects the set of text nodes that intersect the range *before* wrapping (since wrapping replaces text nodes and invalidates the range), then tags each span created from those nodes. After wrapping, only tagged spans are retained.
 
 2. **Build sentences.** The `getSentences()` method constructs sentence strings directly from the wrapped spans. A new sentence boundary is created when a block-level element boundary is detected (e.g., between two `<p>` tags) or when a word ends with sentence-ending punctuation. Because sentences are derived from the actual spans, the word count per sentence is always identical to the span count it covers.
 
@@ -90,13 +94,19 @@ The Highlighter is the single source of truth for the word list. It performs thr
 
 The Highlighter also implements focus mode, which dims all words except the active sentence or visual line using CSS opacity. Visual line detection works by comparing `getBoundingClientRect().top` values of adjacent spans.
 
-On cleanup, all injected spans are replaced with their original text nodes and `Node.normalize()` merges adjacent text nodes back together. This ensures no residual DOM modifications remain after the extension stops.
+On cleanup, all injected spans are replaced with their original text nodes. Parent elements are collected in a `Set` and `Node.normalize()` is called once per unique parent to merge adjacent text nodes back together. This ensures no residual DOM modifications remain after the extension stops.
 
-### 3.3 TextExtractor (`lib/text-extractor.js`)
+The Highlighter's `updateSettings` method uses a key allowlist to prevent stray properties from accumulating, and validates hex color values before applying them.
 
-The TextExtractor identifies the main content area of a page using a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names. If none are found, it falls back to scoring `<div>` and `<section>` elements by text density, penalizing elements with a high ratio of link text. Scoring uses `innerText` rather than `textContent` so that hidden content (collapsed accordions, inactive tabs, etc.) does not inflate element scores.
+### 3.3 Content Detection (`lib/text-extractor.js`)
 
-The TextExtractor is used primarily for its `findMainContent()` method, which returns a DOM element. The actual word wrapping and text extraction for TTS is handled by the Highlighter, which operates on the container element that `findMainContent()` returns.
+This module provides two standalone functions for finding readable content on a page.
+
+`findMainContent()` identifies the main content area using a heuristic approach. It first checks for semantic elements (`<article>`, `<main>`, `[role="main"]`) and common content class names (`.prose`, `.post-content`, `[itemprop="articleBody"]`, etc.). If none are found, it falls back to scoring `<div>` and `<section>` elements by text density, penalizing elements with a high ratio of link text. Scoring uses `innerText` rather than `textContent` so that hidden content (collapsed accordions, inactive tabs, etc.) does not inflate element scores.
+
+`findContainerFor(el)` finds the best content container that includes a given element. This is used by "Read from here" and element picker modes to ensure the container actually contains the starting point. It tries semantic ancestors first, then checks if `findMainContent()` contains the element, then walks up the DOM to find the broadest block-level ancestor with substantial text.
+
+The "Read from here" context menu uses `document.caretPositionFromPoint()` / `document.caretRangeAtPoint()` to resolve the right-click position to the nearest text node, rather than relying on the raw `event.target` which may be a non-text element.
 
 ## 4. Message Flow
 
@@ -108,13 +118,14 @@ All inter-component communication uses `chrome.runtime.sendMessage` and `chrome.
 User clicks Play in popup
     popup.js sends {type: 'play', mode: 'fullpage'} to content script
     content.js calls startReading()
-    TextExtractor.findMainContent() identifies the container
+    findMainContent() identifies the container
     Highlighter.prepare() wraps words in spans
     Highlighter.getSentences() builds the sentence list
     TTSEngine.play(sentences) begins speaking
+    TTSEngine fires onSentenceStart(0) → content.js sends progress with wordCount/wordsRead
     TTSEngine fires onStateChange('playing')
     content.js sends {type: 'stateChanged', state: 'playing'} to popup
-    popup.js updates button visibility
+    popup.js updates button visibility and progress bar
 ```
 
 ### 4.2 Word Highlighting During Playback
@@ -177,7 +188,7 @@ kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
 kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
 ```
 
-Settings defaults are defined in three locations: `content.js` (loadSettings), `popup/popup.js` (loadSettings), and `options/options.js` (DEFAULTS constant). All three must be kept in sync when adding or modifying settings.
+Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page.
 
 ## 6. Reading Modes
 
@@ -187,7 +198,7 @@ The default mode. TextExtractor identifies the main content area and the Highlig
 
 ### 6.2 Selected Text
 
-Reads only the user's current text selection. The content script obtains the selection `Range`, finds the nearest content container, and passes the range to the Highlighter. The Highlighter wraps all words in the container but filters out spans that do not intersect the selection range.
+Reads only the user's current text selection. The content script obtains the selection `Range` and finds the nearest content container via `findContainerFor()`. The Highlighter collects text nodes intersecting the range before wrapping, tags spans derived from those nodes during wrapping, and filters to only tagged spans afterward. This approach survives the DOM mutation that wrapping causes (replacing text nodes with spans invalidates the original range).
 
 ### 6.3 Pick Section (Element Mode)
 
@@ -195,7 +206,7 @@ Activates a click picker. The page cursor changes to crosshair and the next clic
 
 ### 6.4 Read From Here
 
-Similar to element mode but reads from the clicked element to the end of the content container. Can also be triggered via the right-click context menu, which uses the last right-clicked element stored in `content.js`.
+Similar to element mode but reads from the clicked element to the end of the content container. Can also be triggered via the right-click context menu, which uses `caretPositionFromPoint` / `caretRangeAtPoint` to resolve the right-click coordinates to the nearest text node, then finds a content container via `findContainerFor()` with containment validation.
 
 ## 7. Content Script Injection
 
@@ -221,9 +232,10 @@ listen-carefully/
     content.js                 Content script orchestrator. Playback lifecycle and messaging.
     content.css                Injected styles for word highlights and focus mode.
     lib/
+        config.js              Shared constants: settings defaults, skip selectors, Kokoro voice formatting.
         tts-engine.js          Dual-backend TTS engine (Web Speech API + Kokoro).
         highlighter.js         DOM word wrapping, index-based highlighting, focus mode.
-        text-extractor.js      Main content detection and text preprocessing.
+        text-extractor.js      Content detection: findMainContent, findContainerFor.
     popup/
         popup.html             Popup markup.
         popup.js               Popup logic. Playback controls and settings.
@@ -262,7 +274,7 @@ When the extension is reloaded during development, content scripts on already-op
 
 ### 10.4 Settings Synchronization
 
-Settings defaults are duplicated across `content.js`, `popup/popup.js`, and `options/options.js`. When adding a new setting, all three locations must be updated. A future improvement would be to extract defaults into a shared module.
+Settings defaults are defined once in `lib/config.js` as the `SETTINGS_DEFAULTS` object. This file is loaded by content scripts (via `manifest.json`), the popup (via `<script>` tag in `popup.html`), and the options page (via `<script>` tag in `options.html`). When adding a new setting, update `SETTINGS_DEFAULTS` in `config.js` and it is available everywhere.
 
 ### 10.5 Browser Compatibility
 
