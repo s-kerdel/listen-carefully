@@ -31,6 +31,8 @@ class TTSEngine {
     this._audio = null;
     this._blobUrl = null;           // tracked for revocation on stop/skip
     this._kokoroFailCount = 0;      // consecutive failures - stops after 3
+    this._cancelGen = 0;            // incremented on cancel to invalidate in-flight fetches
+    this._restartTimer = null;      // debounce timer for Kokoro settings restart
     this._wordTimerRAF = null;      // requestAnimationFrame ID
     this._wordPositions = [];       // [{charIndex, charLength}] per word in sentence
     this._wordTimestamps = [];      // start time (seconds) per word
@@ -66,6 +68,8 @@ class TTSEngine {
 
   /** Cancel both backends - safe to call regardless of active backend. */
   _cancelAll() {
+    clearTimeout(this._restartTimer);
+    this._cancelGen++;              // invalidate any in-flight Kokoro fetch
     this._stopKokoroPlayback();
     // Clear active speech BEFORE cancel() so stale onend events
     // (fired sync on Firefox, async on Chrome) are ignored.
@@ -109,6 +113,22 @@ class TTSEngine {
           || this.settings.kokoroEndpoint !== prev.kokoroEndpoint
           || this.settings.ttsBackend !== prev.ttsBackend;
         if (!needsRefetch) return;
+      }
+
+      // Debounce Kokoro restarts so rapid slider adjustments don't flood the server
+      if (this._isKokoro) {
+        this._cancelAll();
+        const idx = this.currentIndex;
+        this._restartTimer = setTimeout(() => {
+          if (this.state !== 'playing') {
+            // Paused during debounce: tell resume() to re-speak with new settings
+            if (this.state === 'paused') this._settingsChangedWhilePaused = true;
+            return;
+          }
+          this.currentIndex = idx - 1;
+          this._speakNext();
+        }, 300);
+        return;
       }
 
       const idx = this.currentIndex;
@@ -301,6 +321,7 @@ class TTSEngine {
   async _speakNextKokoro() {
     const text = this.queue[this.currentIndex];
     const sentenceIndex = this.currentIndex;
+    const gen = this._cancelGen;
     const endpoint = (this.settings.kokoroEndpoint || 'http://localhost:8880').replace(/\/+$/, '');
 
     // Fire onSentenceStart immediately so the first word highlights while audio loads
@@ -317,7 +338,8 @@ class TTSEngine {
         speed: this.settings.rate || 1.0,
       });
 
-      // Bail if we were stopped/skipped while waiting for the API
+      // Bail if cancelled (settings change / stop / skip) while fetch was in-flight
+      if (this._cancelGen !== gen) return;
       if (this.state !== 'playing' || this.currentIndex !== sentenceIndex) return;
 
       if (!data || data.error) {
@@ -445,17 +467,14 @@ class TTSEngine {
     const apiWords = allTimestamps.filter(t => typeof t.word === 'string' && /\w/.test(t.word));
     if (apiWords.length === 0) return [];
 
+    // Pre-clean API words once instead of per-comparison in the lookahead
+    const apiClean = apiWords.map(t => t.word.replace(/[^\w]/g, '').toLowerCase());
+
     const text = this.queue[this.currentIndex];
     const result = [];
     let apiIdx = 0;
 
-    for (let i = 0; i < this._wordPositions.length; i++) {
-      if (apiIdx >= apiWords.length) {
-        result.push(result.length > 0 ? result[result.length - 1] : 0);
-        continue;
-      }
-
-      // Take current API word's start_time for this position
+    for (let i = 0; i < this._wordPositions.length && apiIdx < apiWords.length; i++) {
       result.push(apiWords[apiIdx].start_time);
       apiIdx++;
 
@@ -469,7 +488,7 @@ class TTSEngine {
 
         const maxLook = Math.min(apiIdx + 10, apiWords.length);
         for (let j = apiIdx; j < maxLook; j++) {
-          if (apiWords[j].word.replace(/[^\w]/g, '').toLowerCase() === nextClean) {
+          if (apiClean[j] === nextClean) {
             apiIdx = j;
             break;
           }
@@ -477,7 +496,28 @@ class TTSEngine {
       }
     }
 
+    // Interpolate remaining positions when API had fewer words than text
+    this._interpolateTimestamps(result, apiWords);
     return result;
+  }
+
+  /** Fill remaining word positions with char-length-weighted timestamps. */
+  _interpolateTimestamps(result, apiWords) {
+    const total = this._wordPositions.length;
+    if (result.length >= total) return;
+
+    const lastTime = result.length > 0 ? result[result.length - 1] : 0;
+    const endTime = apiWords.length > 0
+      ? (apiWords[apiWords.length - 1].end_time || lastTime * 1.15)
+      : lastTime;
+    const gap = Math.max(0, endTime - lastTime);
+    const remaining = this._wordPositions.slice(result.length);
+    const remChars = remaining.reduce((s, p) => s + p.charLength, 0) || 1;
+    let cum = 0;
+    for (const pos of remaining) {
+      result.push(lastTime + (cum / remChars) * gap);
+      cum += pos.charLength;
+    }
   }
 
   /** Fallback: estimate start times weighted by character length. */
@@ -492,10 +532,10 @@ class TTSEngine {
   }
 
   /** RAF loop: sync highlight to audio.currentTime using word timestamps. */
-  _startWordSync(sentenceIndex) {
+  _startWordSync(sentenceIndex, resetHighlight = true) {
     this._clearWordTimer();
     this._wordTimerSentence = sentenceIndex;
-    this._lastHighlightedIdx = -1;
+    if (resetHighlight) this._lastHighlightedIdx = -1;
 
     const tick = () => {
       if (!this._audio || this.state !== 'playing') return;
@@ -504,9 +544,11 @@ class TTSEngine {
       const ts = this._wordTimestamps;
 
       // Forward scan from last position — audio time only moves forward,
-      // so we never need to re-check earlier timestamps
+      // so we never need to re-check earlier timestamps.
+      // Advance at most 1 word per tick so every word gets at least one
+      // frame of highlight even when timestamps are clustered/duplicated.
       let idx = Math.max(0, this._lastHighlightedIdx);
-      while (idx + 1 < ts.length && t >= ts[idx + 1]) idx++;
+      if (idx + 1 < ts.length && t >= ts[idx + 1]) idx++;
 
       if (idx !== this._lastHighlightedIdx && idx < this._wordPositions.length) {
         this._lastHighlightedIdx = idx;
@@ -522,10 +564,10 @@ class TTSEngine {
     this._wordTimerRAF = requestAnimationFrame(tick);
   }
 
-  /** Restart the RAF loop after pause — self-syncs via audio.currentTime. */
+  /** Restart the RAF loop after pause — preserves highlight position. */
   _resumeWordTimer() {
     if (!this._wordPositions.length || !this._audio) return;
-    this._startWordSync(this._wordTimerSentence);
+    this._startWordSync(this._wordTimerSentence, false);
   }
 
   _clearWordTimer() {
