@@ -21,8 +21,8 @@
     rateValue: document.getElementById('rate-value'),
     volume: document.getElementById('volume'),
     volumeValue: document.getElementById('volume-value'),
+    autoScroll: document.getElementById('auto-scroll'),
     status: document.getElementById('status'),
-    error: document.getElementById('error'),
     progressContainer: document.getElementById('progress-container'),
     progressBar: document.getElementById('progress-bar'),
     progressText: document.getElementById('progress-text'),
@@ -44,15 +44,15 @@
   }
 
   function showError(message) {
-    els.error.textContent = message;
-    els.error.hidden = false;
-    setTimeout(() => { els.error.hidden = true; }, 4000);
+    els.status.textContent = message;
+    els.status.classList.add('status-error');
   }
 
   let currentState = 'stopped';
 
   function updatePlayPauseButtons(state) {
     currentState = state;
+    els.status.classList.remove('status-error');
     if (state === 'playing') {
       els.btnPlay.hidden = true;
       els.btnPause.hidden = false;
@@ -118,6 +118,7 @@
         els.rateValue.textContent = settings.rate.toFixed(1) + 'x';
         els.volume.value = settings.volume;
         els.volumeValue.textContent = Math.round(settings.volume * 100) + '%';
+        els.autoScroll.checked = settings.autoScroll;
         updateBackendUI(settings.ttsBackend, settings.kokoroVoice);
         resolve(settings);
       });
@@ -239,6 +240,9 @@
     volumeDebounce = setTimeout(() => saveSettings({ volume }), 100);
   });
 
+  els.autoScroll.addEventListener('change', () => {
+    saveSettings({ autoScroll: els.autoScroll.checked });
+  });
 
   els.openOptions.addEventListener('click', (e) => {
     e.preventDefault();
