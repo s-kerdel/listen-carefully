@@ -94,7 +94,7 @@ The Highlighter is the single source of truth for the word list. It performs thr
 
 3. **Highlight.** During playback, `highlightWord()` receives the character index and sentence index from the TTS engine's boundary event, uses pre-computed character offsets to map to a global word span index in a single backward scan, and applies inline styles to the active span. The mapping is always index-based, never text-based, which prevents highlighting drift caused by punctuation or whitespace differences. Guards check `span.isConnected` before calling `getBoundingClientRect()` or `scrollIntoView()` to handle cases where page JavaScript removes DOM elements during playback.
 
-The Highlighter also implements focus mode, which dims all words except the active sentence or visual line using CSS opacity. Visual line detection works by comparing `getBoundingClientRect().top` values of adjacent spans.
+The Highlighter also implements focus mode, which dims all words except the active context using CSS opacity. Three modes are available: "Active text" (entire text block), "Active sentence" (sentence split at punctuation), and "Active line" (visual line via `getBoundingClientRect().top` comparison). Sentence splitting is derived from the focus mode — only "Active sentence" splits at punctuation marks.
 
 On cleanup, all injected spans are replaced with their original text nodes. Parent elements are collected in a `Set` and `Node.normalize()` is called once per unique parent to merge adjacent text nodes back together. This ensures no residual DOM modifications remain after the extension stops.
 
@@ -182,8 +182,8 @@ skipCodeBlocks    Boolean. Whether to skip <pre> and <code> elements.
 skipAltText       Boolean. Whether to skip figure captions.
 skipLinks         Boolean. Whether to skip link text (entire <a> elements).
 neonHighlight     Boolean. Whether to apply a glow effect to the active word.
-punctuationPauses Boolean. Whether punctuation forces a sentence break.
-focusMode         String. One of: off, sentence, line.
+punctuationPauses Boolean. Whether TTS adds natural pauses at punctuation marks.
+focusMode         String. One of: off, text, sentence, line. "sentence" implies splitting at punctuation.
 autoScroll        Boolean. Whether to scroll the active word into view.
 ttsBackend        String. One of: browser, kokoro. Default: browser.
 kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
@@ -286,7 +286,7 @@ When the extension is reloaded during development, content scripts on already-op
 
 Settings defaults are defined once in `lib/config.js` as the `SETTINGS_DEFAULTS` object. This file is loaded by content scripts (via `manifest.json`), the popup (via `<script>` tag in `popup.html`), the options page (via `<script>` tag in `options.html`), and the background service worker (via `importScripts`). When adding a new setting, update `SETTINGS_DEFAULTS` in `config.js` and it is available everywhere. All storage writes use `safeSave()` from config.js, which logs quota errors to the console.
 
-Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, neon glow, auto-scroll) immediately. Content filtering settings (skip selectors, punctuation pauses, focus mode, reading mode) are only applied at the start of playback since they require re-wrapping the DOM.
+Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, neon glow, auto-scroll) immediately. Content filtering settings (skip selectors, focus mode, reading mode) are only applied at the start of playback since they require re-wrapping the DOM.
 
 ### 10.5 Browser Compatibility
 
