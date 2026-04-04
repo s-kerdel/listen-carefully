@@ -76,6 +76,8 @@ class TTSEngine {
   /** Cancel both backends - safe to call regardless of active backend. */
   _cancelAll() {
     clearTimeout(this._restartTimer);
+    clearTimeout(this._skipDebounce);
+    this._pendingSkip = false;
     this._cancelGen++;              // invalidate any in-flight Kokoro fetch
     this._stopKokoroPlayback();
     // Clear active speech BEFORE cancel() so stale onend events
@@ -208,6 +210,11 @@ class TTSEngine {
       } else if (this._sourceNode) {
         if (this._audioCtx && this._audioCtx.state === 'suspended') this._audioCtx.resume();
         this._resumeWordTimer();
+      } else if (this._pendingSkip) {
+        // Skip was pending when paused — play the skipped-to sentence
+        this._pendingSkip = false;
+        clearTimeout(this._skipDebounce);
+        this._speakNextKokoro();
       } else {
         // Audio finished while paused — advance to next sentence
         this._speakNext();
@@ -246,18 +253,39 @@ class TTSEngine {
   skipNext() {
     if (this.currentIndex < this.queue.length - 1) {
       this._cancelAll();
+      this.currentIndex++;
       this._setState('playing');
-      this._speakNext();
+      this._skipToCurrentSentence();
     }
   }
 
   skipPrev() {
     if (this.queue.length === 0) return;
     this._cancelAll();
-    // Go to previous sentence, or restart current if already on the first
-    this.currentIndex = Math.max(-1, this.currentIndex - 2);
+    this.currentIndex = Math.max(0, this.currentIndex - 1);
     this._setState('playing');
-    this._speakNext();
+    this._skipToCurrentSentence();
+  }
+
+  /** Instant visual feedback + debounced Kokoro fetch for skip operations.
+   *  Prevents GPU-heavy TTS requests during rapid skipping. */
+  _skipToCurrentSentence() {
+    // Visual feedback is immediate — highlight jumps to the new sentence
+    if (this.onSentenceStart) this.onSentenceStart(this.currentIndex);
+
+    if (this._isKokoro) {
+      // Debounce: only fetch audio once the user stops skipping
+      this._pendingSkip = true;
+      clearTimeout(this._skipDebounce);
+      this._skipDebounce = setTimeout(() => {
+        if (this.state === 'playing') {
+          this._pendingSkip = false;
+          this._speakNextKokoro();
+        }
+      }, 300);
+    } else {
+      this._speakNextBrowser();
+    }
   }
 
   getCurrentSentenceIndex() {

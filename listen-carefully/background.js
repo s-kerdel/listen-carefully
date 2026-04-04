@@ -61,6 +61,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // isLocalhostURL loaded from lib/config.js
 
+let _kokoroController = null;
+
 async function handleKokoroTTS(msg) {
   const endpoint = (msg.endpoint || 'http://localhost:8880').replace(/\/+$/, '');
 
@@ -68,10 +70,13 @@ async function handleKokoroTTS(msg) {
     return { error: 'Endpoint must be a localhost address' };
   }
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+  // Abort any in-flight request so rapid skips don't queue on the GPU.
+  // abort() on a completed controller is a no-op, so this is always safe.
+  if (_kokoroController) _kokoroController.abort();
+  const controller = _kokoroController = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
+  try {
     const response = await fetch(`${endpoint}/dev/captioned_speech`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -95,7 +100,7 @@ async function handleKokoroTTS(msg) {
     // JSON with base64 audio + timestamps — fully sendResponse-serializable
     return await response.json();
   } catch (err) {
-    return { error: err.name === 'AbortError' ? 'Request timed out' : err.message };
+    return { error: err.name === 'AbortError' ? 'Request aborted' : err.message };
   }
 }
 
