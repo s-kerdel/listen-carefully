@@ -60,11 +60,11 @@ onEnd()                                              Called when the entire queu
 onError(message)                                     Called when the Kokoro backend fails (e.g. service unreachable).
 ```
 
-Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` for Kokoro audio elements). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. All Kokoro audio callbacks (`onended`, `onerror`, `playing`) also check `this._audio === audio` to prevent stale events from a replaced audio element. The `_stopKokoroPlayback()` method explicitly nulls all event listeners (`onended`, `onerror`, `onloadedmetadata`) before pausing and unloading the audio element to prevent memory leaks from retained references.
+Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_sourceNode` for Kokoro `AudioBufferSourceNode`s). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. The Kokoro `sourceNode.onended` callback checks `this._sourceNode === sourceNode` to prevent stale events from a replaced source node. The `_stopKokoroPlayback()` method nulls `_sourceNode` before calling `stop()` and disconnects the node from the audio graph.
 
 Both backends have error recovery with a 3-strike counter. If a sentence fails, the engine skips to the next. After 3 consecutive failures it stops with an error message. Success resets the counter.
 
-Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If no settings actually changed, the restart is skipped to avoid an audible glitch. For the Kokoro backend, volume changes are applied directly to the `Audio` element without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
+Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If no settings actually changed, the restart is skipped to avoid an audible glitch. For the Kokoro backend, volume changes are applied directly to the `GainNode` without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
 
 #### 3.1.1 Kokoro Word Highlighting
 
@@ -72,7 +72,7 @@ The browser backend receives native `onboundary` events with exact character pos
 
 The `/dev/captioned_speech` endpoint returns base64-encoded audio alongside a `timestamps` array containing `{word, start_time, end_time}` entries. English voices support timestamps; non-English voices return `null`, triggering a character-length-weighted estimation fallback.
 
-Word highlighting is synchronized via a `requestAnimationFrame` loop that reads `audio.currentTime` and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
+Word highlighting is synchronized via a `requestAnimationFrame` loop that reads the `AudioContext.currentTime` offset (relative to playback start) and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
 
 Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`). The timestamp mapping uses a forward scan with text-matching lookahead to re-sync after expanded tokens. Punctuation-only API entries (commas, periods) are skipped in the scan, but their timing gaps are preserved because the next word's `start_time` is naturally after the pause.
 
@@ -80,7 +80,7 @@ Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$5
 
 Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
 
-Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries with type validation on each entry. Blob URLs are revoked on all exit paths. Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
+Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB and timestamp arrays are capped at 5000 entries with type validation on each entry. Audio is decoded via `AudioContext.decodeAudioData()` which operates on raw `ArrayBuffer`s in memory, bypassing page CSP restrictions (e.g. `media-src` directives that block `blob:` URLs). Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
@@ -142,7 +142,7 @@ Browser fires SpeechSynthesisUtterance boundary event
 
 Kokoro backend:
 ```
-requestAnimationFrame tick reads audio.currentTime
+requestAnimationFrame tick reads audioCtx.currentTime offset
     TTSEngine finds matching word via timestamp lookup
     TTSEngine calls onBoundary(charIndex, charLength, sentenceIndex)
     (same flow as browser backend from here)
