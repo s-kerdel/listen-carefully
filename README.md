@@ -8,7 +8,7 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 
 1. **Word-level highlighting.** The currently spoken word is highlighted directly on the page with configurable colors and an optional neon glow effect.
 2. **Multiple reading modes.** Full page, selected text, pick a section, or read from a specific point on the page.
-3. **Focus mode.** Dims the surrounding text to show only the active sentence or line, designed for users who benefit from reduced visual noise.
+3. **Focus mode.** Dims the surrounding text to show only the active text block, sentence, or line, designed for users who benefit from reduced visual noise.
 4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse. Shortcuts use `stopPropagation` to prevent conflicts with site access keys.
 5. **Voice selection.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language.
 6. **Kokoro TTS support.** Optionally connect to a local [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server for higher quality voices with word-level timestamps. Supports 67 voices across 9 languages. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.

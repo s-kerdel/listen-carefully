@@ -108,18 +108,21 @@ body.dark {
   font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.3px;
+  flex: 1;
+}
+
+.header-settings {
+  color: var(--text-secondary);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+.header-settings:hover {
+  color: var(--accent);
+  background: var(--accent-glow);
 }
 
 /* --- Error --- */
-.error {
-  background: var(--error-bg);
-  border: 1px solid var(--error-border);
-  color: var(--error-text);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  animation: slideDown 0.2s ease;
-}
 
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-6px); }
@@ -228,6 +231,9 @@ body.dark {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
+}
+.status-error {
+  color: var(--error-text);
 }
 
 .progress-text {
@@ -400,6 +406,25 @@ select optgroup { background: var(--bg-input); color: var(--text-secondary); }
   font-weight: 400;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.csp-fallback .engine-badge {
+  border-color: #e89234;
+  background: rgba(232, 146, 52, 0.12);
+}
+.csp-fallback .engine-badge .badge-label {
+  color: #e89234;
+}
+.csp-fallback .engine-badge .badge-label::after {
+  content: ' (CSP)';
+  font-size: 11px;
+}
+
+/* --- Separator --- */
+.popup-sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2px 0;
 }
 
 /* --- Color pickers --- */

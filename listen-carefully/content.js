@@ -129,19 +129,22 @@
     highlighter.focusMode = fm;
     highlighter.prepare(container, skipSelectors, range);
 
+    // "Active sentence" focus mode implies sentence splitting at punctuation
+    const splitAtPunctuation = fm === 'sentence';
+
     // Build sentences directly from spans - word counts are guaranteed to match
-    sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+    sentences = highlighter.getSentences({ punctuationPauses: splitAtPunctuation });
     if (sentences.length === 0 && !range) {
       // Fullpage mode: retry without skip selectors, then with document.body
       highlighter.cleanup();
       highlighter.focusMode = fm;
       highlighter.prepare(container, [], null);
-      sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+      sentences = highlighter.getSentences({ punctuationPauses: splitAtPunctuation });
       if (sentences.length === 0 && container !== document.body) {
         highlighter.cleanup();
         highlighter.focusMode = fm;
         highlighter.prepare(document.body, skipSelectors, null);
-        sentences = highlighter.getSentences({ punctuationPauses: settings.punctuationPauses });
+        sentences = highlighter.getSentences({ punctuationPauses: splitAtPunctuation });
       }
     }
     if (sentences.length === 0) {
@@ -320,6 +323,7 @@
           wordsRead,
           estimatedSeconds: wordCount > 0 ? Math.round((wordCount / wordsPerMin) * 60) : 0,
           ttsBackend: engine.settings.ttsBackend || 'browser',
+          cspFallback: engine._cspFallback || false,
         });
         return true;
       }

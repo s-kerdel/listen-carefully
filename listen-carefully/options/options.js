@@ -43,6 +43,7 @@
     siteHostname: document.getElementById('site-hostname'),
     siteSelector: document.getElementById('site-selector'),
     btnAddSite: document.getElementById('btn-add-site'),
+    btnReset: document.getElementById('btn-reset'),
     savedMsg: document.getElementById('saved-msg'),
   };
 
@@ -386,6 +387,18 @@
   els.punctuationPauses.addEventListener('change', () => save({ punctuationPauses: els.punctuationPauses.checked }));
   els.focusMode.addEventListener('change', () => save({ focusMode: els.focusMode.value }));
   els.autoScroll.addEventListener('change', () => save({ autoScroll: els.autoScroll.checked }));
+
+  els.btnReset.addEventListener('click', () => {
+    if (!confirm('Reset all settings to defaults?')) return;
+    chrome.storage.local.set(SETTINGS_DEFAULTS, () => {
+      chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+          chrome.tabs.sendMessage(tab.id, { type: 'updateSettings', settings: SETTINGS_DEFAULTS }).catch(() => {});
+        }
+      });
+      location.reload();
+    });
+  });
 
   // --- Site selectors ---
 

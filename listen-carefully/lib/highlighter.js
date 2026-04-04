@@ -365,7 +365,7 @@ class Highlighter {
 
     if (wordIndex >= 0 && wordIndex < this.wordSpans.length) {
       // Focus mode: highlight surrounding context
-      if (this.focusMode === 'sentence') {
+      if (this.focusMode === 'sentence' || this.focusMode === 'text') {
         for (const info of this.sentenceMap) {
           if (wordIndex >= info.startWordIndex && wordIndex < info.startWordIndex + info.wordCount) {
             this._currentSentenceSpans = this.wordSpans.slice(info.startWordIndex, info.startWordIndex + info.wordCount);

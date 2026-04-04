@@ -2,8 +2,10 @@
  * TTS Engine - supports both Web Speech Synthesis API and Kokoro (OpenAI-compatible) TTS.
  *
  * Browser backend: wraps speechSynthesis with sentence-level queue management.
- * Kokoro backend: fetches audio from local API, plays via Audio element,
- * and estimates word boundaries for highlighting.
+ * Kokoro backend: fetches audio from local API, plays via Audio element
+ * (with AudioContext fallback for CSP-restricted pages), cleans non-word
+ * token prefixes before synthesis, and estimates word boundaries for
+ * highlighting.
  *
  * Chromium silently stops long utterances (~15s), so the browser backend
  * chunks text into sentences and feeds them one at a time.
@@ -28,8 +30,13 @@ class TTSEngine {
     };
 
     // Kokoro playback state
-    this._audio = null;
+    this._audio = null;             // HTMLAudioElement (primary path)
     this._blobUrl = null;           // tracked for revocation on stop/skip
+    this._audioCtx = null;          // lazily created, only for CSP fallback
+    this._gainNode = null;          // created with audioCtx, reused
+    this._sourceNode = null;        // AudioBufferSourceNode (CSP fallback path)
+    this._playbackStartTime = 0;    // audioCtx.currentTime when source started
+    this._cspFallback = false;      // true after Audio element blocked by page CSP
     this._kokoroFailCount = 0;      // consecutive failures - stops after 3
     this._cancelGen = 0;            // incremented on cancel to invalidate in-flight fetches
     this._restartTimer = null;      // debounce timer for Kokoro settings restart
@@ -69,6 +76,8 @@ class TTSEngine {
   /** Cancel both backends - safe to call regardless of active backend. */
   _cancelAll() {
     clearTimeout(this._restartTimer);
+    clearTimeout(this._skipDebounce);
+    this._pendingSkip = false;
     this._cancelGen++;              // invalidate any in-flight Kokoro fetch
     this._stopKokoroPlayback();
     // Clear active speech BEFORE cancel() so stale onend events
@@ -85,6 +94,10 @@ class TTSEngine {
     'voiceURI', 'rate', 'pitch', 'volume', 'ttsBackend',
     'kokoroEndpoint', 'kokoroVoice',
   ];
+
+  // Spoken expansions for leading non-word prefixes in Kokoro text.
+  // Prevents timestamp truncation while keeping symbols audible.
+  static _PREFIX_MAP = { '/': 'slash', '@': 'at', '#': 'hash' };
 
   updateSettings(settings) {
     const wasPlaying = this.state === 'playing';
@@ -106,8 +119,9 @@ class TTSEngine {
     // Restart current sentence so new settings apply immediately.
     if (wasPlaying && this.queue.length > 0) {
       // Kokoro: volume is client-side, update instantly without re-fetching
-      if (this._isKokoro && this._audio) {
-        this._audio.volume = this.settings.volume;
+      if (this._isKokoro && (this._audio || this._sourceNode)) {
+        if (this._audio) this._audio.volume = this.settings.volume;
+        else this._gainNode.gain.value = this.settings.volume;
         const needsRefetch = this.settings.rate !== prev.rate
           || this.settings.kokoroVoice !== prev.kokoroVoice
           || this.settings.kokoroEndpoint !== prev.kokoroEndpoint
@@ -160,6 +174,7 @@ class TTSEngine {
     if (this.state !== 'playing') return;
     if (this._isKokoro) {
       if (this._audio) this._audio.pause();
+      else if (this._audioCtx && this._audioCtx.state === 'running') this._audioCtx.suspend();
       this._clearWordTimer();
     } else {
       speechSynthesis.pause();
@@ -192,6 +207,14 @@ class TTSEngine {
       if (this._audio) {
         this._audio.play();
         this._resumeWordTimer();
+      } else if (this._sourceNode) {
+        if (this._audioCtx && this._audioCtx.state === 'suspended') this._audioCtx.resume();
+        this._resumeWordTimer();
+      } else if (this._pendingSkip) {
+        // Skip was pending when paused — play the skipped-to sentence
+        this._pendingSkip = false;
+        clearTimeout(this._skipDebounce);
+        this._speakNextKokoro();
       } else {
         // Audio finished while paused — advance to next sentence
         this._speakNext();
@@ -230,18 +253,39 @@ class TTSEngine {
   skipNext() {
     if (this.currentIndex < this.queue.length - 1) {
       this._cancelAll();
+      this.currentIndex++;
       this._setState('playing');
-      this._speakNext();
+      this._skipToCurrentSentence();
     }
   }
 
   skipPrev() {
     if (this.queue.length === 0) return;
     this._cancelAll();
-    // Go to previous sentence, or restart current if already on the first
-    this.currentIndex = Math.max(-1, this.currentIndex - 2);
+    this.currentIndex = Math.max(0, this.currentIndex - 1);
     this._setState('playing');
-    this._speakNext();
+    this._skipToCurrentSentence();
+  }
+
+  /** Instant visual feedback + debounced Kokoro fetch for skip operations.
+   *  Prevents GPU-heavy TTS requests during rapid skipping. */
+  _skipToCurrentSentence() {
+    // Visual feedback is immediate — highlight jumps to the new sentence
+    if (this.onSentenceStart) this.onSentenceStart(this.currentIndex);
+
+    if (this._isKokoro) {
+      // Debounce: only fetch audio once the user stops skipping
+      this._pendingSkip = true;
+      clearTimeout(this._skipDebounce);
+      this._skipDebounce = setTimeout(() => {
+        if (this.state === 'playing') {
+          this._pendingSkip = false;
+          this._speakNextKokoro();
+        }
+      }, 300);
+    } else {
+      this._speakNextBrowser();
+    }
   }
 
   getCurrentSentenceIndex() {
@@ -324,6 +368,22 @@ class TTSEngine {
     const gen = this._cancelGen;
     const endpoint = (this.settings.kokoroEndpoint || 'http://localhost:8880').replace(/\/+$/, '');
 
+    // Clean text for Kokoro: expand or strip leading non-word chars from
+    // tokens to prevent Kokoro from truncating timestamps at special chars.
+    // Known prefixes are spoken (e.g. "/" → "slash"); unknown ones are
+    // stripped (e.g. "-a" → "a"). Original text is kept for highlight mapping.
+    const kokoroText = text.split(' ')
+      .map(w => {
+        const m = w.match(/^([^\w]+)(.*)/);
+        if (!m) return w;
+        const [, prefix, rest] = m;
+        if (!rest) return '';
+        const spoken = TTSEngine._PREFIX_MAP[prefix];
+        return spoken ? spoken + ' ' + rest : rest;
+      })
+      .filter(w => w.length > 0)
+      .join(' ');
+
     // Fire onSentenceStart immediately so the first word highlights while audio loads
     if (this.onSentenceStart) this.onSentenceStart(sentenceIndex);
 
@@ -332,7 +392,7 @@ class TTSEngine {
       // Background validates localhost and returns JSON (base64 audio + timestamps).
       const data = await chrome.runtime.sendMessage({
         type: 'kokoroTTS',
-        text,
+        text: kokoroText,
         endpoint,
         voice: this.settings.kokoroVoice || 'af_alloy',
         speed: this.settings.rate || 1.0,
@@ -358,15 +418,10 @@ class TTSEngine {
         return;
       }
 
-      // Decode base64 audio → Blob with allowlisted MIME type
+      // Decode base64 audio
       const raw = atob(data.audio);
       const bytes = new Uint8Array(raw.length);
       for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-      const AUDIO_TYPES = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/mp3'];
-      const mimeType = AUDIO_TYPES.includes(data.audio_format) ? data.audio_format : 'audio/mpeg';
-      const blob = new Blob([bytes], { type: mimeType });
-      const blobUrl = URL.createObjectURL(blob);
-      this._blobUrl = blobUrl;
 
       // Build word positions (charIndex/charLength in the sentence text)
       this._wordPositions = this._computeWordPositions(text);
@@ -375,56 +430,115 @@ class TTSEngine {
       const timestamps = (data.timestamps || []).slice(0, 5000);
       this._wordTimestamps = this._buildWordTimestamps(timestamps);
 
-      const audio = new Audio(blobUrl);
-      this._audio = audio;
-      audio.volume = this.settings.volume;
+      if (this._cspFallback) {
+        await this._kokoroPlayAudioCtx(bytes, sentenceIndex, gen);
+      } else {
+        this._kokoroPlayAudio(bytes, data.audio_format, sentenceIndex, gen);
+      }
+    } catch (err) {
+      console.warn('Kokoro TTS request failed:', err);
+      this._handleKokoroFailure();
+    }
+  }
 
-      // Fallback: estimate timestamps from audio duration if API provided none
-      audio.onloadedmetadata = () => {
-        if (this._audio !== audio) return;
-        if (this._wordTimestamps.length === 0 && this._wordPositions.length > 0 && audio.duration > 0) {
-          this._wordTimestamps = this._estimateWordTimestamps(audio.duration);
-        }
-      };
+  // --- Kokoro playback paths ---
 
-      // Start word sync only when audio actually begins playing
-      audio.addEventListener('playing', () => {
-        if (this._audio === audio) this._startWordSync(sentenceIndex);
-      }, { once: true });
+  /** Primary path: play via HTMLAudioElement (low memory, streaming decode). */
+  _kokoroPlayAudio(bytes, audioFormat, sentenceIndex, gen) {
+    const AUDIO_TYPES = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/mp3'];
+    const mimeType = AUDIO_TYPES.includes(audioFormat) ? audioFormat : 'audio/mpeg';
+    const blob = new Blob([bytes], { type: mimeType });
+    const blobUrl = URL.createObjectURL(blob);
+    this._blobUrl = blobUrl;
 
-      // Guard all callbacks: ignore stale events from a replaced audio element.
-      // _stopKokoroPlayback sets this._audio = null before the old element's
-      // async events fire, so checking identity prevents double-advancing.
-      audio.onended = () => {
-        if (this._audio !== audio) return;
+    const audio = new Audio(blobUrl);
+    this._audio = audio;
+    audio.volume = this.settings.volume;
+
+    // Fallback: estimate timestamps from audio duration if API provided none
+    audio.onloadedmetadata = () => {
+      if (this._audio !== audio) return;
+      if (this._wordTimestamps.length === 0 && this._wordPositions.length > 0 && audio.duration > 0) {
+        this._wordTimestamps = this._estimateWordTimestamps(audio.duration);
+      }
+    };
+
+    // Start word sync only when audio actually begins playing
+    audio.addEventListener('playing', () => {
+      if (this._audio === audio) this._startWordSync(sentenceIndex);
+    }, { once: true });
+
+    // Guard all callbacks: _stopKokoroPlayback sets this._audio = null
+    // before the old element's async events fire, so checking identity
+    // prevents double-advancing.
+    audio.onended = () => {
+      if (this._audio !== audio) return;
+      this._clearWordTimer();
+      this._revokeBlobUrl();
+      this._audio = null;
+      if (this.state === 'playing' && this.currentIndex === sentenceIndex) {
+        this._speakNext();
+      }
+    };
+
+    audio.onerror = () => {
+      if (this._audio !== audio) return;
+      console.info('Kokoro: Audio element blocked by page CSP — using AudioContext fallback');
+      this._clearWordTimer();
+      this._revokeBlobUrl();
+      this._audio = null;
+      // Retry this sentence via AudioContext; bytes.buffer is still valid
+      this._kokoroPlayAudioCtx(bytes, sentenceIndex, gen);
+    };
+
+    audio.play().catch((err) => {
+      if (err.name === 'AbortError' || this._audio !== audio) return;
+      console.info('Kokoro: audio.play() blocked by page CSP — using AudioContext fallback');
+      this._clearWordTimer();
+      this._revokeBlobUrl();
+      this._audio = null;
+      this._kokoroPlayAudioCtx(bytes, sentenceIndex, gen);
+    });
+  }
+
+  /** CSP fallback: play via AudioContext.decodeAudioData (bypasses media-src). */
+  async _kokoroPlayAudioCtx(bytes, sentenceIndex, gen) {
+    try {
+      const audioCtx = this._getOrCreateAudioCtx();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+      const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+
+      // Async boundary — re-check cancel/state
+      if (this._cancelGen !== gen) return;
+      if (this.state !== 'playing' || this.currentIndex !== sentenceIndex) return;
+
+      // Fallback: estimate timestamps from decoded duration if API provided none
+      if (this._wordTimestamps.length === 0 && this._wordPositions.length > 0 && audioBuffer.duration > 0) {
+        this._wordTimestamps = this._estimateWordTimestamps(audioBuffer.duration);
+      }
+
+      // Create one-shot source node for this sentence
+      const sourceNode = audioCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(this._gainNode);
+      this._sourceNode = sourceNode;
+      this._playbackStartTime = audioCtx.currentTime;
+
+      sourceNode.onended = () => {
+        if (this._sourceNode !== sourceNode) return;
         this._clearWordTimer();
-        this._revokeBlobUrl();
-        this._audio = null;
+        this._sourceNode = null;
         if (this.state === 'playing' && this.currentIndex === sentenceIndex) {
           this._speakNext();
         }
       };
 
-      audio.onerror = () => {
-        if (this._audio !== audio) return;
-        console.warn('Kokoro audio playback error');
-        this._clearWordTimer();
-        this._revokeBlobUrl();
-        this._audio = null;
-        this._handleKokoroFailure();
-      };
-
-      audio.play().catch((err) => {
-        // AbortError is expected when stop/skip interrupts a pending play()
-        if (err.name === 'AbortError' || this._audio !== audio) return;
-        console.warn('Kokoro audio play failed:', err.message);
-        this._clearWordTimer();
-        this._revokeBlobUrl();
-        this._audio = null;
-        this._handleKokoroFailure();
-      });
+      sourceNode.start();
+      this._cspFallback = true; // Confirmed: Audio blocked, AudioCtx works
+      this._startWordSync(sentenceIndex);
     } catch (err) {
-      console.warn('Kokoro TTS request failed:', err);
+      console.warn('Kokoro AudioContext fallback failed:', err);
       this._handleKokoroFailure();
     }
   }
@@ -531,16 +645,18 @@ class TTSEngine {
     });
   }
 
-  /** RAF loop: sync highlight to audio.currentTime using word timestamps. */
+  /** RAF loop: sync highlight to playback time using word timestamps. */
   _startWordSync(sentenceIndex, resetHighlight = true) {
     this._clearWordTimer();
     this._wordTimerSentence = sentenceIndex;
     if (resetHighlight) this._lastHighlightedIdx = -1;
 
     const tick = () => {
-      if (!this._audio || this.state !== 'playing') return;
+      if ((!this._audio && !this._sourceNode) || this.state !== 'playing') return;
 
-      const t = this._audio.currentTime;
+      const t = this._audio
+        ? this._audio.currentTime
+        : this._audioCtx.currentTime - this._playbackStartTime;
       const ts = this._wordTimestamps;
 
       // Forward scan from last position — audio time only moves forward,
@@ -566,7 +682,7 @@ class TTSEngine {
 
   /** Restart the RAF loop after pause — preserves highlight position. */
   _resumeWordTimer() {
-    if (!this._wordPositions.length || !this._audio) return;
+    if (!this._wordPositions.length || (!this._audio && !this._sourceNode)) return;
     this._startWordSync(this._wordTimerSentence, false);
   }
 
@@ -575,6 +691,16 @@ class TTSEngine {
       cancelAnimationFrame(this._wordTimerRAF);
       this._wordTimerRAF = null;
     }
+  }
+
+  _getOrCreateAudioCtx() {
+    if (!this._audioCtx) {
+      this._audioCtx = new AudioContext();
+      this._gainNode = this._audioCtx.createGain();
+      this._gainNode.connect(this._audioCtx.destination);
+    }
+    this._gainNode.gain.value = this.settings.volume;
+    return this._audioCtx;
   }
 
   _revokeBlobUrl() {
@@ -595,6 +721,13 @@ class TTSEngine {
       a.pause();
       a.removeAttribute('src');
       a.load();
+    }
+    if (this._sourceNode) {
+      const s = this._sourceNode;
+      this._sourceNode = null;       // nullify BEFORE stop (identity guard)
+      s.onended = null;
+      try { s.stop(); } catch (e) {} // throws if already stopped
+      s.disconnect();
     }
     this._revokeBlobUrl();
   }

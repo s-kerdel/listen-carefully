@@ -36,7 +36,7 @@ The popup is the primary user interface. It opens when the user clicks the toolb
 
 When playback is paused, the play button label changes from "Read" to "Resume" and sends a `togglePlayPause` message instead of `play`, so that clicking it resumes from the current position rather than restarting.
 
-The popup polls the content script every 500ms to keep its state synchronized, since runtime messages can be missed if the popup opens after playback has already started.
+The popup polls the content script every 500ms to keep its state synchronized, since runtime messages can be missed if the popup opens after playback has already started. When the Kokoro engine falls back to AudioContext due to page CSP restrictions, the engine badge turns orange and appends "(CSP)" to indicate the fallback is active. This status is reported via the `cspFallback` field in the `getState` response.
 
 ### 2.4 Options Page
 
@@ -60,11 +60,11 @@ onEnd()                                              Called when the entire queu
 onError(message)                                     Called when the Kokoro backend fails (e.g. service unreachable).
 ```
 
-Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` for Kokoro audio elements). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. All Kokoro audio callbacks (`onended`, `onerror`, `playing`) also check `this._audio === audio` to prevent stale events from a replaced audio element. The `_stopKokoroPlayback()` method explicitly nulls all event listeners (`onended`, `onerror`, `onloadedmetadata`) before pausing and unloading the audio element to prevent memory leaks from retained references.
+Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` or `_sourceNode` for Kokoro). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. All Kokoro audio callbacks check identity (`this._audio === audio` or `this._sourceNode === sourceNode`) to prevent stale events from advancing playback. The `_stopKokoroPlayback()` method cleans up whichever playback path is active: for `HTMLAudioElement` it nulls event listeners, pauses, and unloads; for `AudioBufferSourceNode` it nulls, stops, and disconnects.
 
 Both backends have error recovery with a 3-strike counter. If a sentence fails, the engine skips to the next. After 3 consecutive failures it stops with an error message. Success resets the counter.
 
-Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If no settings actually changed, the restart is skipped to avoid an audible glitch. For the Kokoro backend, volume changes are applied directly to the `Audio` element without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
+Settings changes (voice, rate, pitch, volume) take effect immediately during playback by cancelling and restarting the current sentence with the new parameters. If no settings actually changed, the restart is skipped to avoid an audible glitch. For the Kokoro backend, volume changes are applied directly to the active playback object (`Audio` element or `GainNode`) without re-fetching. If settings are changed while paused, a `_settingsChangedWhilePaused` flag causes the next `resume()` call to re-speak the current sentence with the updated parameters.
 
 #### 3.1.1 Kokoro Word Highlighting
 
@@ -72,15 +72,17 @@ The browser backend receives native `onboundary` events with exact character pos
 
 The `/dev/captioned_speech` endpoint returns base64-encoded audio alongside a `timestamps` array containing `{word, start_time, end_time}` entries. English voices support timestamps; non-English voices return `null`, triggering a character-length-weighted estimation fallback.
 
-Word highlighting is synchronized via a `requestAnimationFrame` loop that reads `audio.currentTime` and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
+Word highlighting is synchronized via a `requestAnimationFrame` loop that reads the playback time (`audio.currentTime` or `AudioContext.currentTime` offset) and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
 
 Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`). The timestamp mapping uses a forward scan with text-matching lookahead to re-sync after expanded tokens. Punctuation-only API entries (commas, periods) are skipped in the scan, but their timing gaps are preserved because the next word's `start_time` is naturally after the pause.
+
+Before sending text to Kokoro, the engine cleans tokens that start with non-word characters (e.g. `-a`, `/all`, `>`). Kokoro's timestamp generator truncates at these tokens — it continues generating audio but stops emitting word boundaries. Known prefixes are expanded to spoken forms (`/` → "slash", `@` → "at", `#` → "hash") via `_PREFIX_MAP`; unknown prefixes are stripped (e.g. `-a` → `"a"`). The original (uncleaned) sentence text is retained for `_computeWordPositions` so that highlight charIndex mapping still resolves to the correct DOM spans. The `_buildWordTimestamps` lookahead handles the mismatch by stripping non-word characters from both sides before comparison.
 
 #### 3.1.2 Security
 
 Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
 
-Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries with type validation on each entry. Blob URLs are revoked on all exit paths. Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
+Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries with type validation on each entry. Blob URLs are revoked on all exit paths. On pages with strict Content Security Policy (e.g. `media-src` directives that block `blob:` URLs), the engine automatically falls back to `AudioContext.decodeAudioData()` which operates on raw `ArrayBuffer`s in memory, bypassing CSP entirely. Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
@@ -92,7 +94,7 @@ The Highlighter is the single source of truth for the word list. It performs thr
 
 3. **Highlight.** During playback, `highlightWord()` receives the character index and sentence index from the TTS engine's boundary event, uses pre-computed character offsets to map to a global word span index in a single backward scan, and applies inline styles to the active span. The mapping is always index-based, never text-based, which prevents highlighting drift caused by punctuation or whitespace differences. Guards check `span.isConnected` before calling `getBoundingClientRect()` or `scrollIntoView()` to handle cases where page JavaScript removes DOM elements during playback.
 
-The Highlighter also implements focus mode, which dims all words except the active sentence or visual line using CSS opacity. Visual line detection works by comparing `getBoundingClientRect().top` values of adjacent spans.
+The Highlighter also implements focus mode, which dims all words except the active context using CSS opacity. Three modes are available: "Active text" (entire text block), "Active sentence" (sentence split at punctuation), and "Active line" (visual line via `getBoundingClientRect().top` comparison). Sentence splitting is derived from the focus mode — only "Active sentence" splits at punctuation marks.
 
 On cleanup, all injected spans are replaced with their original text nodes. Parent elements are collected in a `Set` and `Node.normalize()` is called once per unique parent to merge adjacent text nodes back together. This ensures no residual DOM modifications remain after the extension stops.
 
@@ -142,7 +144,7 @@ Browser fires SpeechSynthesisUtterance boundary event
 
 Kokoro backend:
 ```
-requestAnimationFrame tick reads audio.currentTime
+requestAnimationFrame tick reads audio.currentTime (or audioCtx offset)
     TTSEngine finds matching word via timestamp lookup
     TTSEngine calls onBoundary(charIndex, charLength, sentenceIndex)
     (same flow as browser backend from here)
@@ -180,8 +182,8 @@ skipCodeBlocks    Boolean. Whether to skip <pre> and <code> elements.
 skipAltText       Boolean. Whether to skip figure captions.
 skipLinks         Boolean. Whether to skip link text (entire <a> elements).
 neonHighlight     Boolean. Whether to apply a glow effect to the active word.
-punctuationPauses Boolean. Whether punctuation forces a sentence break.
-focusMode         String. One of: off, sentence, line.
+punctuationPauses Boolean. Whether TTS adds natural pauses at punctuation marks.
+focusMode         String. One of: off, text, sentence, line. "sentence" implies splitting at punctuation.
 autoScroll        Boolean. Whether to scroll the active word into view.
 ttsBackend        String. One of: browser, kokoro. Default: browser.
 kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
@@ -284,7 +286,7 @@ When the extension is reloaded during development, content scripts on already-op
 
 Settings defaults are defined once in `lib/config.js` as the `SETTINGS_DEFAULTS` object. This file is loaded by content scripts (via `manifest.json`), the popup (via `<script>` tag in `popup.html`), the options page (via `<script>` tag in `options.html`), and the background service worker (via `importScripts`). When adding a new setting, update `SETTINGS_DEFAULTS` in `config.js` and it is available everywhere. All storage writes use `safeSave()` from config.js, which logs quota errors to the console.
 
-Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, neon glow, auto-scroll) immediately. Content filtering settings (skip selectors, punctuation pauses, focus mode, reading mode) are only applied at the start of playback since they require re-wrapping the DOM.
+Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, neon glow, auto-scroll) immediately. Content filtering settings (skip selectors, focus mode, reading mode) are only applied at the start of playback since they require re-wrapping the DOM.
 
 ### 10.5 Browser Compatibility
 
