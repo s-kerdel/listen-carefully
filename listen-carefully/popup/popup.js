@@ -180,6 +180,7 @@
       if (result.state !== 'stopped' && result.totalSentences > 0) {
         updateProgress(result.sentenceIndex, result.totalSentences, result.wordCount, result.wordsRead, result.estimatedSeconds);
       }
+      els.kokoroInfo.classList.toggle('csp-fallback', !!result.cspFallback);
     }
   }
 

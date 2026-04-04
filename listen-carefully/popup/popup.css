@@ -402,6 +402,18 @@ select optgroup { background: var(--bg-input); color: var(--text-secondary); }
   font-size: 12px;
 }
 
+.csp-fallback .engine-badge {
+  border-color: #e89234;
+  background: rgba(232, 146, 52, 0.12);
+}
+.csp-fallback .engine-badge .badge-label {
+  color: #e89234;
+}
+.csp-fallback .engine-badge .badge-label::after {
+  content: ' (CSP)';
+  font-size: 11px;
+}
+
 /* --- Color pickers --- */
 .color-row {
   display: flex;

@@ -320,6 +320,7 @@
           wordsRead,
           estimatedSeconds: wordCount > 0 ? Math.round((wordCount / wordsPerMin) * 60) : 0,
           ttsBackend: engine.settings.ttsBackend || 'browser',
+          cspFallback: engine._cspFallback || false,
         });
         return true;
       }
