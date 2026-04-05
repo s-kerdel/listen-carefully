@@ -408,8 +408,11 @@ class TTSEngine {
         return;
       }
 
-      // Success - reset failure counter
-      this._kokoroFailCount = 0;
+      // Success - reset failure counter and clear any error shown in the popup
+      if (this._kokoroFailCount > 0) {
+        this._kokoroFailCount = 0;
+        this._setState('playing');
+      }
 
       // Validate and cap payload to prevent OOM from malicious responses
       if (!data.audio || data.audio.length > 15_000_000) {
@@ -551,6 +554,7 @@ class TTSEngine {
       this.stop();
       return;
     }
+    if (this.onError) this.onError(`Kokoro TTS: connection failed, retrying... (${this._kokoroFailCount}/3)`);
     if (this.state === 'playing') this._speakNext();
   }
 

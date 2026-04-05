@@ -52,12 +52,14 @@
 
   function updatePlayPauseButtons(state) {
     currentState = state;
-    els.status.classList.remove('status-error');
+    const hasError = els.status.classList.contains('status-error');
     if (state === 'playing') {
+      els.status.classList.remove('status-error');
       els.btnPlay.hidden = true;
       els.btnPause.hidden = false;
       els.status.textContent = 'Playing...';
     } else if (state === 'paused') {
+      els.status.classList.remove('status-error');
       els.btnPlay.hidden = false;
       els.btnPause.hidden = true;
       els.btnPlay.querySelector('span').textContent = 'Resume';
@@ -68,7 +70,7 @@
       els.btnPause.hidden = true;
       els.btnPlay.querySelector('span').textContent = 'Read';
       els.btnPlay.setAttribute('aria-label', 'Read aloud');
-      els.status.textContent = 'Ready';
+      if (!hasError) els.status.textContent = 'Ready';
       els.progressContainer.hidden = true;
       els.progressText.hidden = true;
       els.readingInfo.hidden = true;
