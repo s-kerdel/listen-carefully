@@ -270,12 +270,14 @@
   });
 
   // --- Theme detection (class-based fallback for Brave) ---
+  // Also reports the theme to the background service worker so the toolbar
+  // icon stays in sync even on tabs where no content script runs (chrome://,
+  // new tab page, etc.).
   function applyTheme() {
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.body.classList.add('dark');
-    } else {
-      document.body.classList.remove('dark');
-    }
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('dark', isDark);
+    try { chrome.runtime.sendMessage({ type: 'themeDetected', isDark }).catch(() => {}); }
+    catch { /* extension context invalidated */ }
   }
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);

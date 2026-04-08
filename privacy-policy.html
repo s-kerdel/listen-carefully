@@ -34,7 +34,7 @@
 <body>
   <div class="container">
     <h1>Privacy Statement for Listen Carefully Browser Extension</h1>
-    <p class="meta">Last Update: April 4, 2026<br>Extension version: 1.1.2</p>
+    <p class="meta">Last Update: April 8, 2026<br>Extension version: 1.1.3</p>
 
     <p>At Power to Logic, we take your privacy seriously. This Privacy Statement outlines how we collect, use, and protect your personal information when you use our browser extension.</p>
     <p>We want to assure you that Listen Carefully is designed to prioritize your data security and privacy. Listen Carefully does not collect, store, or transmit any user data to external servers. We do not use telemetry or network connectivity for data sharing.</p>
@@ -53,8 +53,7 @@
     <p>Listen Carefully requests certain browser permissions for its core functionalities. These permissions are used exclusively for the purpose of the extension's features and do not involve the collection or transmission of personal data.</p>
     <ul>
       <li><strong>Storage:</strong> Listen Carefully uses the storage permission to save your preferences such as voice selection, playback speed, highlight colors, and focus mode settings. This data remains on your device and is not shared with external servers or third parties.</li>
-      <li><strong>Active Tab:</strong> This permission allows Listen Carefully to access the content of the current page in order to read text aloud and apply word-level highlighting. Content scripts are injected into web pages (http://, https://) and optionally local files (file://) when "Allow access to file URLs" is enabled in your browser's extension settings. Page content is processed locally and is never transmitted.</li>
-      <li><strong>Scripting:</strong> This permission is used to inject the text-to-speech and highlighting functionality into web pages. No scripts are loaded from external sources.</li>
+      <li><strong>Content Script Access:</strong> Listen Carefully injects content scripts into web pages (http://, https://) and optionally local files (file://) when "Allow access to file URLs" is enabled in your browser's extension settings. These scripts read the page text in order to speak it aloud and apply word-level highlighting. Page content is processed locally and is never transmitted.</li>
       <li><strong>Context Menus:</strong> This permission enables the "Read from here" right-click menu option for convenient access to the reader.</li>
       <li><strong>Localhost Access (optional):</strong> This permission is only requested when you enable the Kokoro TTS backend in settings. It allows the extension to communicate with a TTS server running on your own machine. The permission is limited to localhost and 127.0.0.1 addresses and cannot be used to contact external servers. If you do not use the Kokoro feature, this permission is never requested or granted.</li>
     </ul>

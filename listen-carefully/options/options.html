@@ -168,9 +168,17 @@
             </div>
             <div class="control-group">
               <label for="kokoro-voice">Voice</label>
-              <select id="kokoro-voice">
-                <option value="af_alloy">af_alloy</option>
-              </select>
+              <div class="voice-row">
+                <select id="kokoro-voice" style="flex:1">
+                  <option value="" disabled selected>Loading...</option>
+                </select>
+                <button id="btn-refresh-kokoro" class="btn" type="button" aria-label="Refresh voices" title="Refresh voices">
+                  <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"/>
+                    <path d="M20.49 15A9 9 0 1 1 18.36 5.64L23 10"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
           <div class="kokoro-note" role="note">

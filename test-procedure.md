@@ -7,6 +7,8 @@
 3. Click "Load unpacked" and select the `listen-carefully/` folder (or reload if already loaded)
 4. Open a content-rich page (e.g. a Wikipedia article or blog post)
 
+**Note for Kokoro tests:** The first time you switch the TTS backend to **Kokoro** in any test, the browser prompts to grant localhost access. Click **Allow**. Subsequent switches in the same session do not re-prompt. If you click **Block**, the backend reverts to Browser and the test cannot proceed.
+
 ---
 
 ## 1. Selection Mode
@@ -155,5 +157,47 @@
 4. Click **Test Connection**
 5. Wait up to 20 seconds
 
-**Pass:** After ~15 seconds, shows "Failed: Request timed out".
-**Fail:** The "Connecting..." message stays forever and never resolves.
+**Pass:** After ~15 seconds (or sooner — connection refused on localhost is usually immediate), shows "Cannot reach Kokoro server at http://localhost:9999. Is the server running?". The Voice dropdown displays the saved voice (e.g. "Alloy - Female (American English)") in a disabled state.
+**Fail:** The "Connecting..." message stays forever and never resolves, or the dropdown still shows the misleading hardcoded `af_alloy` placeholder, or the error reads "Failed: Failed to fetch".
+
+---
+
+## 11. Kokoro Voice Dropdown — Error States and Refresh Button
+
+**Goal:** The voice dropdown reflects server state honestly and the refresh button recovers from errors without losing the saved voice.
+
+### 11a. Server unreachable shows the saved voice (not af_alloy)
+
+1. Open the Options page
+2. Set TTS backend to **Kokoro**
+3. Set the endpoint to `http://localhost:9999` (a port with nothing running)
+4. Wait a moment for the dropdown to auto-load
+
+**Pass:** Voice dropdown shows the previously saved voice formatted as a name (e.g. "Alloy - Female (American English)") in a grayed-out disabled state. Below it, a red error toast displays "Cannot reach Kokoro server at http://localhost:9999. Is the server running?".
+**Fail:** Dropdown shows the literal text "af_alloy", or the dropdown is empty, or the error toast is missing or generic.
+
+### 11b. Refresh button recovers when the server comes back
+
+(Requires a Kokoro server you can start on demand.)
+
+1. Continue from 11a — confirm the dropdown is in the error state
+2. Set the endpoint back to a valid value (e.g. `http://localhost:8880`)
+3. Start the Kokoro server (separate process)
+4. Click the **Refresh voices** icon button next to the Voice dropdown
+
+**Pass:** Dropdown populates with grouped voices (English, Japanese, etc.). The error toast disappears. If the previously saved voice exists in the new list, it is automatically selected.
+**Fail:** Dropdown stays in the error state, the refresh button does nothing visible, or the saved voice is replaced by an arbitrary first entry.
+
+### 11c. Saved voice survives error round-trip
+
+(Verifies that storage is not clobbered when the dropdown is in an error state.)
+
+1. Open the Options page with Kokoro selected and a working server
+2. Pick a non-default voice (e.g. "Michael - Male (American English)")
+3. Stop the Kokoro server
+4. Click the refresh button — confirm the dropdown shows "Michael - Male (American English)" (disabled) and the error toast appears
+5. Restart the Kokoro server
+6. Click refresh again
+
+**Pass:** After step 6, "Michael - Male (American English)" is automatically reselected — the saved voice was preserved across the error state.
+**Fail:** The dropdown reverts to "Alloy" (default) or any voice other than the one chosen in step 2.

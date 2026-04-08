@@ -5,10 +5,15 @@
 (function () {
   'use strict';
 
-  // Theme detection (class-based for Brave compatibility)
+  // Theme detection (class-based for Brave compatibility).
+  // Also reports the theme to the background service worker so the toolbar
+  // icon stays in sync even when the user opens the options page directly
+  // without first visiting a normal tab or opening the popup.
   function applyTheme() {
-    document.body.classList.toggle('dark',
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('dark', isDark);
+    try { chrome.runtime.sendMessage({ type: 'themeDetected', isDark }).catch(() => {}); }
+    catch { /* extension context invalidated */ }
   }
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
@@ -18,6 +23,7 @@
     kokoroSettings: document.getElementById('kokoro-settings'),
     kokoroEndpoint: document.getElementById('kokoro-endpoint'),
     kokoroVoice: document.getElementById('kokoro-voice'),
+    btnRefreshKokoro: document.getElementById('btn-refresh-kokoro'),
     btnTestKokoro: document.getElementById('btn-test-kokoro'),
     kokoroTestResult: document.getElementById('kokoro-test-result'),
     voiceSection: document.getElementById('voice-section'),
@@ -92,20 +98,50 @@
 
   async function loadKokoroOptions() {
     const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');
-    if (!isLocalhostURL(endpoint)) return;
+    const { kokoroVoice: savedVoice } = await new Promise(r =>
+      chrome.storage.local.get({ kokoroVoice: 'af_alloy' }, r)
+    );
 
-    const savedVoice = els.kokoroVoice.value;
+    // Replace dropdown with a disabled option that displays the saved voice,
+    // and surface the error reason in the existing kokoro-test-result element.
+    // The option carries savedVoice as its value so any incidental save() is
+    // a no-op (storage stays untouched).
+    const showError = (msg) => {
+      els.kokoroVoice.replaceChildren();
+      const opt = document.createElement('option');
+      opt.value = savedVoice;
+      opt.disabled = true;
+      opt.selected = true;
+      opt.textContent = formatKokoroVoice(savedVoice);
+      els.kokoroVoice.appendChild(opt);
+      els.kokoroTestResult.hidden = false;
+      els.kokoroTestResult.textContent = msg;
+      els.kokoroTestResult.className = 'test-result error';
+    };
+
+    if (!isLocalhostURL(endpoint)) {
+      showError('Endpoint must be a localhost address (localhost, 127.0.0.1)');
+      return;
+    }
 
     try {
       const ac = new AbortController();
       const t = setTimeout(() => ac.abort(), 15000);
       const res = await fetch(`${endpoint}/v1/audio/voices`, { signal: ac.signal }).catch(() => null);
       clearTimeout(t);
-      if (!res?.ok) return;
+      if (!res?.ok) {
+        showError(res
+          ? `Kokoro server at ${endpoint} returned HTTP ${res.status}`
+          : `Cannot reach Kokoro server at ${endpoint}. Is the server running?`);
+        return;
+      }
 
       const data = await res.json();
       const voices = Array.isArray(data.voices) ? data.voices.filter(v => typeof v === 'string') : [];
-      if (voices.length === 0) return;
+      if (voices.length === 0) {
+        showError(`Kokoro server at ${endpoint} returned no voices`);
+        return;
+      }
 
       // Group by language (merge male+female under same lang, like browser voices)
       const langGroups = {};
@@ -143,7 +179,10 @@
       }
 
       els.kokoroVoice.value = voices.includes(savedVoice) ? savedVoice : voices[0];
-    } catch { /* API unreachable — keep current dropdown values */ }
+      els.kokoroTestResult.hidden = true;
+    } catch {
+      showError(`Cannot reach Kokoro server at ${endpoint}. Is the server running?`);
+    }
   }
 
   // --- Load voices (options page has direct access to speechSynthesis) ---
@@ -279,6 +318,8 @@
   });
   els.kokoroVoice.addEventListener('change', () => saveKokoroSetting('kokoroVoice', els.kokoroVoice));
 
+  els.btnRefreshKokoro.addEventListener('click', loadKokoroOptions);
+
   // isLocalhostURL loaded from lib/config.js
 
   els.btnTestKokoro.addEventListener('click', async () => {
@@ -309,11 +350,15 @@
           speed: parseFloat(els.rate.value) || 1.0,
         }),
         signal: ac.signal,
-      });
+      }).catch(() => null);
       clearTimeout(t);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (!response?.ok) {
+        els.kokoroTestResult.textContent = response
+          ? `Kokoro server at ${endpoint} returned HTTP ${response.status}`
+          : `Cannot reach Kokoro server at ${endpoint}. Is the server running?`;
+        els.kokoroTestResult.className = 'test-result error';
+        return;
       }
 
       const blob = await response.blob();
@@ -333,8 +378,7 @@
       els.kokoroTestResult.textContent = 'Connected — playing test audio...';
       els.kokoroTestResult.className = 'test-result success';
     } catch (err) {
-      const msg = err.name === 'AbortError' ? 'Request timed out' : err.message;
-      els.kokoroTestResult.textContent = 'Failed: ' + msg;
+      els.kokoroTestResult.textContent = `Test failed: ${err.message}`;
       els.kokoroTestResult.className = 'test-result error';
     }
   });
@@ -412,7 +456,7 @@
       row.innerHTML =
         `<span class="site-entry-host"></span>` +
         `<span class="site-entry-selector"></span>` +
-        `<button class="btn-delete" aria-label="Remove ${host}">` +
+        `<button class="btn-delete" aria-label="Remove custom selector">` +
         `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
         `</button>`;
       row.querySelector('.site-entry-host').textContent = host;

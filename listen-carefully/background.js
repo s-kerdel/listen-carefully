@@ -11,8 +11,21 @@
 importScripts('lib/config.js');
 
 // --- Theme-aware icon ---
+//
+// The icon follows the user's prefers-color-scheme. Content scripts and the
+// popup both report the current theme via 'themeDetected' messages, and the
+// last value is cached in chrome.storage.local so the icon survives service
+// worker restarts and browser restarts without needing the 'scripting'
+// permission to probe tabs.
+
+// Tracks whether the icon has been set from a live signal during this service
+// worker lifetime. Used to skip the storage-cache restore if a fresh
+// 'themeDetected' message arrives before the async storage read resolves
+// (otherwise the stale snapshot could clobber the live value).
+let _iconSetThisLifetime = false;
 
 function setIconTheme(isDark) {
+  _iconSetThisLifetime = true;
   const suffix = isDark ? 'light' : 'dark';
   chrome.action.setIcon({
     path: {
@@ -23,23 +36,12 @@ function setIconTheme(isDark) {
   });
 }
 
-// Probe the active tab's theme on startup so the icon is correct
-// before any content script sends a themeDetected message.
-async function probeTheme() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || tab.url?.startsWith('chrome://')) return;
-    const [result] = await Promise.race([
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-    ]);
-    if (result?.result !== undefined) setIconTheme(result.result);
-  } catch { /* tab not scriptable or timed out - keep default icon */ }
-}
-probeTheme();
+// Restore the last-known theme on service worker cold start. Falls back to
+// the manifest's default icon if the cache is empty (first install only).
+chrome.storage.local.get('_iconTheme', (data) => {
+  if (_iconSetThisLifetime) return; // a live message already set the icon
+  if (typeof data?._iconTheme === 'boolean') setIconTheme(data._iconTheme);
+});
 
 // --- Context menu ---
 
@@ -109,8 +111,9 @@ async function handleKokoroTTS(msg) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
 
-  if (msg.type === 'themeDetected') {
+  if (msg.type === 'themeDetected' && typeof msg.isDark === 'boolean') {
     setIconTheme(msg.isDark);
+    chrome.storage.local.set({ _iconTheme: msg.isDark });
   }
 
   if (msg.type === 'kokoroTTS') {

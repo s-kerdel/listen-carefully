@@ -242,6 +242,7 @@ input[type="url"]::placeholder {
 }
 .voice-row .btn {
   white-space: nowrap;
+  align-self: stretch;
 }
 
 .voice-privacy-note {
@@ -699,7 +700,7 @@ select.inline-select {
 
 .site-add-row input[type="text"] { flex: 1; }
 
-.site-add-row .btn { flex-shrink: 0; }
+.site-add-row .btn { flex-shrink: 0; align-self: stretch; }
 
 /* --- Keyboard shortcuts --- */
 .shortcut-section {

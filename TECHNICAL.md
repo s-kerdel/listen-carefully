@@ -14,7 +14,7 @@ The extension consists of four layers that communicate through Chrome's messagin
 
 File: `background.js`
 
-The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has three responsibilities: switching the toolbar icon between light and dark variants based on the active page's color scheme (with a 5-second timeout on the theme probe), managing the right-click context menu entry ("Read from here"), and proxying Kokoro TTS API requests.
+The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has three responsibilities: switching the toolbar icon between light and dark variants based on the user's `prefers-color-scheme` (reported by content scripts and the popup, cached in `chrome.storage.local` for cold-start restores), managing the right-click context menu entry ("Read from here"), and proxying Kokoro TTS API requests.
 
 Kokoro fetches are routed through the service worker rather than the content script to avoid Chrome's per-site permission prompts for cross-origin localhost requests. The service worker validates the endpoint against localhost, fetches from the Kokoro API, and returns the JSON response (base64 audio + timestamps) via `sendResponse`. This is fully JSON-serializable and avoids the ArrayBuffer transfer limitations of Chrome extension messaging.
 
@@ -168,7 +168,7 @@ Speed changes from keyboard shortcuts are persisted via `safeSave()` (which logs
 
 ## 5. Storage
 
-All settings are stored in `chrome.storage.local`. No sync storage or external persistence is used. The following keys are stored:
+Settings and internal state are stored in `chrome.storage.local`. No sync storage or external persistence is used. The following keys are stored:
 
 ```
 voiceURI          String or null. The selected browser voice identifier.
@@ -190,9 +190,15 @@ kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
 kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
 siteSelectors     Object. Map of hostname to CSS selector for per-site content
                   detection overrides. Default: {} (empty).
+
+# Internal state (not user-facing settings)
+_iconTheme        Boolean. Last reported prefers-color-scheme value, cached so the
+                  toolbar icon variant can be restored on service worker cold start
+                  without re-probing tabs. Refreshed on every themeDetected message
+                  from a content script or the popup.
 ```
 
-Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page.
+Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page. The `_iconTheme` key is internal to the background service worker and is intentionally excluded from `SETTINGS_DEFAULTS` so it never surfaces in popup/options UI.
 
 ## 6. Reading Modes
 
@@ -226,7 +232,9 @@ On page unload, the `beforeunload` handler stops the TTS engine and calls `Highl
 
 ## 8. Theme Detection
 
-The extension icon adapts to the user's system theme. On startup, the background service worker probes the active tab's `prefers-color-scheme` media query via `chrome.scripting.executeScript`. Content scripts also send a `themeDetected` message whenever the media query changes. The service worker switches between light and dark icon sets accordingly.
+The extension icon adapts to the user's system theme without requiring the `scripting` permission. Content scripts and the popup both read the `prefers-color-scheme` media query and send a `themeDetected` message to the background service worker, which switches between light and dark icon sets accordingly. The popup acts as a fallback reporter for tabs where no content script runs (`chrome://`, new tab page, etc.).
+
+The background service worker caches the last reported value in `chrome.storage.local` under `_iconTheme` and restores it on cold start, so the icon survives service worker idle restarts and browser restarts. On a fresh install with no cached value, the manifest's default icon is shown until the first `themeDetected` message arrives — typically within milliseconds of opening any page or the popup.
 
 The popup and options page apply a `dark` class to the body element based on the same media query, enabling CSS-based dark mode without JavaScript style manipulation.
 
