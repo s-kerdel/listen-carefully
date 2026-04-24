@@ -14,7 +14,7 @@ The extension consists of four layers that communicate through Chrome's messagin
 
 File: `background.js`
 
-The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has three responsibilities: switching the toolbar icon between light and dark variants based on the user's `prefers-color-scheme` (reported by content scripts and the popup, cached in `chrome.storage.local` for cold-start restores), managing the right-click context menu entry ("Read from here"), and proxying Kokoro TTS API requests.
+The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has two responsibilities: managing the right-click context menu entry ("Read from here") and proxying Kokoro TTS API requests.
 
 Kokoro fetches are routed through the service worker rather than the content script to avoid Chrome's per-site permission prompts for cross-origin localhost requests. The service worker validates the endpoint against localhost, fetches from the Kokoro API, and returns the JSON response (base64 audio + timestamps) via `sendResponse`. This is fully JSON-serializable and avoids the ArrayBuffer transfer limitations of Chrome extension messaging.
 
@@ -60,7 +60,7 @@ onEnd()                                              Called when the entire queu
 onError(message)                                     Called when the Kokoro backend fails (e.g. service unreachable).
 ```
 
-Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` or `_sourceNode` for Kokoro). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events — fired synchronously on Firefox or asynchronously on Chrome — see a mismatch and are ignored. All Kokoro audio callbacks check identity (`this._audio === audio` or `this._sourceNode === sourceNode`) to prevent stale events from advancing playback. The `_stopKokoroPlayback()` method cleans up whichever playback path is active: for `HTMLAudioElement` it nulls event listeners, pauses, and unloads; for `AudioBufferSourceNode` it nulls, stops, and disconnects.
+Stale event handling uses identity checks rather than flags. Each backend tracks its active playback object (`_activeSpeech` for browser utterances, `_audio` or `_sourceNode` for Kokoro). When `_cancelAll()` runs, it nulls these references before calling `speechSynthesis.cancel()`, so any stale `onend` events - fired synchronously on Firefox or asynchronously on Chrome - see a mismatch and are ignored. All Kokoro audio callbacks check identity (`this._audio === audio` or `this._sourceNode === sourceNode`) to prevent stale events from advancing playback. The `_stopKokoroPlayback()` method cleans up whichever playback path is active: for `HTMLAudioElement` it nulls event listeners, pauses, and unloads; for `AudioBufferSourceNode` it nulls, stops, and disconnects.
 
 Both backends have error recovery with a 3-strike counter. If a sentence fails, the engine skips to the next. After 3 consecutive failures it stops with an error message. Success resets the counter.
 
@@ -76,7 +76,7 @@ Word highlighting is synchronized via a `requestAnimationFrame` loop that reads 
 
 Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`). The timestamp mapping uses a forward scan with text-matching lookahead to re-sync after expanded tokens. Punctuation-only API entries (commas, periods) are skipped in the scan, but their timing gaps are preserved because the next word's `start_time` is naturally after the pause.
 
-Before sending text to Kokoro, the engine cleans tokens that start with non-word characters (e.g. `-a`, `/all`, `>`). Kokoro's timestamp generator truncates at these tokens — it continues generating audio but stops emitting word boundaries. Known prefixes are expanded to spoken forms (`/` → "slash", `@` → "at", `#` → "hash") via `_PREFIX_MAP`; unknown prefixes are stripped (e.g. `-a` → `"a"`). The original (uncleaned) sentence text is retained for `_computeWordPositions` so that highlight charIndex mapping still resolves to the correct DOM spans. The `_buildWordTimestamps` lookahead handles the mismatch by stripping non-word characters from both sides before comparison.
+Before sending text to Kokoro, the engine cleans tokens that start with non-word characters (e.g. `-a`, `/all`, `>`). Kokoro's timestamp generator truncates at these tokens - it continues generating audio but stops emitting word boundaries. Known prefixes are expanded to spoken forms (`/` → "slash", `@` → "at", `#` → "hash") via `_PREFIX_MAP`; unknown prefixes are stripped (e.g. `-a` → `"a"`). The original (uncleaned) sentence text is retained for `_computeWordPositions` so that highlight charIndex mapping still resolves to the correct DOM spans. The `_buildWordTimestamps` lookahead handles the mismatch by stripping non-word characters from both sides before comparison.
 
 #### 3.1.2 Security
 
@@ -86,19 +86,45 @@ Settings updates use an allowlisted key loop instead of `Object.assign` to preve
 
 ### 3.2 Highlighter (`lib/highlighter.js`)
 
-The Highlighter is the single source of truth for the word list. It performs three operations in sequence:
+The Highlighter is the single source of truth for the word list. It uses the **CSS Custom Highlight API** (`CSS.highlights` + `Highlight` + `::highlight()`), so the page DOM is never mutated during playback. This is what makes the extension safe on framework-managed pages (Vue, React, Nuxt, etc.) - stale vnode references are impossible because no nodes are inserted, moved, or removed.
 
-1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and wraps each word in a `<span class="tts-word">` element. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. If a selection `Range` is provided, the Highlighter collects the set of text nodes that intersect the range *before* wrapping (since wrapping replaces text nodes and invalidates the range), then tags each span created from those nodes. Boundary text nodes are trimmed using the range's start/end offsets so only words within the precise selection are included. After wrapping, only tagged spans are retained.
+It performs three operations in sequence:
 
-2. **Build sentences.** The `getSentences()` method constructs sentence strings directly from the wrapped spans. A new sentence boundary is created when a block-level element boundary is detected (e.g., between two `<p>` tags) or when a word ends with sentence-ending punctuation. Pre-computed character offsets are stored in each sentence map entry so that `highlightWord()` can resolve character positions without repeated string splitting. Because sentences are derived from the actual spans, the word count per sentence is always identical to the span count it covers.
+1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and records each word as a `{textNode, start, end, block, text}` entry in an internal list. No DOM writes occur. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. Open shadow roots are descended into recursively by `_walkForTextNodes`, so web-component content (custom elements, design-system components, etc.) is read alongside light DOM; closed shadow roots are inaccessible and silently skipped. If a selection `Range` is provided, the Highlighter collects the set of text nodes that intersect the range, and only words from those nodes are recorded. Boundary text nodes are trimmed using the range's start/end offsets so only words within the precise selection are included.
 
-3. **Highlight.** During playback, `highlightWord()` receives the character index and sentence index from the TTS engine's boundary event, uses pre-computed character offsets to map to a global word span index in a single backward scan, and applies inline styles to the active span. The mapping is always index-based, never text-based, which prevents highlighting drift caused by punctuation or whitespace differences. Guards check `span.isConnected` before calling `getBoundingClientRect()` or `scrollIntoView()` to handle cases where page JavaScript removes DOM elements during playback.
+2. **Build sentences.** The `getSentences()` method constructs sentence strings directly from the recorded words. A new sentence boundary is created when a block-level element boundary is detected (e.g., between two `<p>` tags) or when a word ends with sentence-ending punctuation. Pre-computed character offsets are stored in each sentence map entry so that `highlightWord()` can resolve character positions without repeated string splitting. The word count per sentence is always identical to the word-entry count it covers.
 
-The Highlighter also implements focus mode, which dims all words except the active context using CSS opacity. Three modes are available: "Active text" (entire text block), "Active sentence" (sentence split at punctuation), and "Active line" (visual line via `getBoundingClientRect().top` comparison). Sentence splitting is derived from the focus mode — only "Active sentence" splits at punctuation marks.
+3. **Highlight.** During playback, `highlightWord()` receives the character index and sentence index from the TTS engine's boundary event, uses pre-computed character offsets to map to a global word index in a single backward scan, builds a `Range` over the matching text-node slice, and swaps it into a persistent `Highlight` object registered as `lc-word-active` via `CSS.highlights.set()`. The mapping is always index-based, never text-based, which prevents highlighting drift caused by punctuation or whitespace differences. `Range.isConnected`-style guards inside `_makeRange()` return `null` when a text node has been detached, so page JavaScript that removes DOM elements during playback causes a graceful skip rather than an error.
 
-On cleanup, all injected spans are replaced with their original text nodes. Parent elements are collected in a `Set` and `Node.normalize()` is called once per unique parent to merge adjacent text nodes back together. This ensures no residual DOM modifications remain after the extension stops.
+Three persistent `Highlight` objects are registered via `CSS.highlights.set()` with explicit `priority` values so painting order is deterministic: `lc-dim` (priority 0, painted first / underneath), `lc-sentence-active` (priority 1), `lc-word-active` (priority 2, painted on top). Focus mode selects among three extents - "Active text" (entire text block delimited by block-tag boundaries), "Active sentence" (sentence split at punctuation), and "Active line" (visual line computed by comparing per-word `range.getBoundingClientRect().top` against a half-height tolerance). Sentence splitting at punctuation is gated on the "Active sentence" focus mode.
 
-The Highlighter's `updateSettings` method uses a key allowlist to prevent stray properties from accumulating, and validates hex color values before applying them.
+Focus mode offers two dim styles controlled by the `focusDimStyle` setting:
+
+- **`dim`** (default) - inverse approach. The `lc-dim` highlight is populated with every word *outside* the active sentence/line, painting them gray via `::highlight(lc-dim) { color: rgba(128,128,128,0.55) }`. The active range is deliberately excluded from all three highlights (no `lc-sentence-active` band is drawn either), so it inherits the page's original text color through `currentColor` and remains visually untouched apart from the word's own highlight bucket. Consecutive words in the same text node are coalesced into a single `Range` when populating `lc-dim`, keeping the highlight set compact on long pages.
+- **`band`** - container-level approach. The container receives the `lc-focus-active` class which fades every descendant via `color: rgba(128,128,128,0.55) !important`. The active sentence/line is populated into `lc-sentence-active` and paints over the dim with an explicit `color: var(--lc-sentence-color)` set on the container to the user's highlight foreground. This produces a bright coloured band over the active range while everything else fades.
+
+On each paint call (`_applyHighlight`), the three `Highlight` objects are re-created and re-registered via `CSS.highlights.set()` rather than cleared in place. This forces Chromium to fully invalidate the painted region, avoiding a known paint-stickiness issue where `.clear()` alone sometimes left a residual glow after skip/stop.
+
+Highlight colors flow via CSS custom properties set on the reading container in `_applyStyleVars()`:
+
+- `--lc-hl-bg` / `--lc-hl-fg` - the user's configured primary and secondary colors.
+- `--lc-sentence-color` - set only in band focus mode to force the sentence range's text color to the secondary color.
+- `--lc-underline-color` - set only when the `matchingUnderline` toggle is off, routing the color-underline marker's underline to the secondary color instead of the primary.
+
+The active word's marker style is selected by the `wordMarkerStyle` setting and rendered entirely inside the `::highlight(lc-word-active)` pseudo-element - there is no DOM overlay of any kind:
+
+- **`color-underline`** (default) - the word's text takes `--lc-hl-bg` (primary) and gets a 3 px underline that defaults to the same primary color. When the user turns `matchingUnderline` off, `--lc-underline-color` is set to the secondary color, giving a two-color word-plus-underline look.
+- **`color-underline-continuous`** - same rendering as `color-underline` but sets `text-decoration-skip-ink: none`, so the underline runs straight through descenders (g, q, p) instead of breaking around them.
+- **`color`** - primary color only, no background, no underline.
+- **`bg-only`** - the base `::highlight()` rule applies untouched: solid primary background with secondary text color.
+
+Class-driven styles register their class name in `Highlighter._MARKER_CLASS_BY_STYLE`; `_refreshMarkerClass()` removes all known marker classes and adds the one matching the current setting. `bg-only` is the base case and needs no class.
+
+Auto-scroll tracks the active word via a rAF-driven ease loop (`_scrollStep`) toward a moving target. While the word is inside the 10-90 % viewport band the loop stays idle. Once it reaches the edge, `_scrollToRange()` sets the target to put the word at ~25 % from the top (leaving roughly a page-worth of reading space below) and the loop eases in at 12 % of remaining distance per frame. A scroll listener watches for user-initiated scrolls; any unexpected `scrollY` change aborts the active loop and pauses retargeting for 1.5 s so the extension doesn't fight a user who grabs the scrollbar.
+
+On cleanup, all three `Highlight` registrations are deleted via `CSS.highlights.delete()`, every marker class and the `lc-focus-active` class are removed from the container, and the container's custom properties are cleared. Because no spans were ever inserted and no overlay element was added, there is nothing to unwrap.
+
+The Highlighter's `updateSettings` method uses a key allowlist to prevent stray properties from accumulating, validates hex color values before applying them, and coerces `wordMarkerStyle` / `focusDimStyle` to their valid enum values.
 
 ### 3.3 Content Detection (`lib/text-extractor.js`)
 
@@ -121,7 +147,7 @@ User clicks Play in popup
     popup.js sends {type: 'play', mode: 'fullpage'} to content script
     content.js calls startReading()
     findMainContent() identifies the container
-    Highlighter.prepare() wraps words in spans
+    Highlighter.prepare() records the word list (no DOM mutation)
     Highlighter.getSentences() builds the sentence list
     TTSEngine.play(sentences) begins speaking
     TTSEngine fires onSentenceStart(0) → content.js sends progress with wordCount/wordsRead
@@ -137,9 +163,9 @@ Browser backend:
 Browser fires SpeechSynthesisUtterance boundary event
     TTSEngine calls onBoundary(charIndex, charLength, sentenceIndex)
     content.js forwards to Highlighter.highlightWord()
-    Highlighter maps charIndex to global word span index
-    Highlighter applies inline styles to the active span
-    Highlighter scrolls the span into view if auto-scroll is enabled
+    Highlighter maps charIndex to global word index
+    Highlighter swaps the Range inside the lc-word-active Highlight object
+    Highlighter scrolls the range into view if auto-scroll is enabled
 ```
 
 Kokoro backend:
@@ -181,30 +207,39 @@ mode              String. One of: fullpage, readfromhere, element, selection.
 skipCodeBlocks    Boolean. Whether to skip <pre> and <code> elements.
 skipAltText       Boolean. Whether to skip figure captions.
 skipLinks         Boolean. Whether to skip link text (entire <a> elements).
-neonHighlight     Boolean. Whether to apply a glow effect to the active word.
 punctuationPauses Boolean. Whether TTS adds natural pauses at punctuation marks.
 focusMode         String. One of: off, text, sentence, line. "sentence" implies splitting at punctuation.
-autoScroll        Boolean. Whether to scroll the active word into view.
+focusDimStyle     String. One of: dim, band. Default: dim. Controls how the active
+                  range is emphasized in focus mode. "dim" fades non-active text
+                  via the lc-dim highlight; the active range keeps the page's
+                  original text color. "band" dims everything via a container
+                  class and paints the active sentence in the highlight foreground.
+wordMarkerStyle   String. One of: color-underline, color-underline-continuous,
+                  color, bg-only. Default: color-underline. Selects the visual
+                  style of the active-word marker. The continuous variant sets
+                  text-decoration-skip-ink: none so the underline runs through
+                  descenders.
+matchingUnderline Boolean. Default: true. In the color-underline variants,
+                  routes the underline to the primary color (same as the word)
+                  when true, or the secondary color when false.
+autoScroll        Boolean. Whether to track the active word with a rAF ease
+                  loop. Triggers only when the word reaches the top 10% or
+                  bottom 10% of the viewport, then eases to park it at ~25%
+                  from the top. Pauses for 1.5s after any user-initiated scroll.
 ttsBackend        String. One of: browser, kokoro. Default: browser.
 kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
 kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
 siteSelectors     Object. Map of hostname to CSS selector for per-site content
                   detection overrides. Default: {} (empty).
-
-# Internal state (not user-facing settings)
-_iconTheme        Boolean. Last reported prefers-color-scheme value, cached so the
-                  toolbar icon variant can be restored on service worker cold start
-                  without re-probing tabs. Refreshed on every themeDetected message
-                  from a content script or the popup.
 ```
 
-Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page. The `_iconTheme` key is internal to the background service worker and is intentionally excluded from `SETTINGS_DEFAULTS` so it never surfaces in popup/options UI.
+Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page.
 
 ## 6. Reading Modes
 
 ### 6.1 Full Page
 
-The default mode. TextExtractor identifies the main content area and the Highlighter wraps all words within it. Navigation, sidebars, sidebar buttons, footers, ads, and other non-content elements are excluded via skip selectors. The `header` skip selector is scoped to site-level headers only (`body > header`, `body > div > header`) so that `<header>` elements used within articles to wrap titles are not skipped. The `button` element is not skipped, as inline buttons can contain sentence text.
+The default mode. TextExtractor identifies the main content area and the Highlighter records all words within it (without DOM mutation). Navigation, sidebars, sidebar buttons, footers, ads, and other non-content elements are excluded via skip selectors. The `header` skip selector is scoped to site-level headers only (`body > header`, `body > div > header`) so that `<header>` elements used within articles to wrap titles are not skipped. The `button` element is not skipped, as inline buttons can contain sentence text.
 
 If skip selectors filter out all text in the detected container, fullpage mode retries without selectors. If still empty (container itself has no text), it falls back to `document.body` with skip selectors re-enabled, ensuring the user always gets something to read.
 
@@ -212,7 +247,7 @@ If skip selectors filter out all text in the detected container, fullpage mode r
 
 Reads only the user's current text selection. The content script obtains the selection `Range` and uses the range's `commonAncestorContainer` as the container, guaranteeing all selected text nodes are within scope. The last selection range is saved so that if the popup steals focus and the browser clears the selection, the saved range is used as fallback.
 
-The Highlighter collects text nodes intersecting the range before wrapping, tags spans derived from those nodes during wrapping, and filters to only tagged spans afterward. Boundary text nodes (where the selection starts or ends mid-node) are trimmed using character offsets so only words within the precise selection are included. This approach survives the DOM mutation that wrapping causes (replacing text nodes with spans invalidates the original range).
+The Highlighter collects text nodes intersecting the range, then during its read-only DOM walk records only words whose source text node is in that set. Boundary text nodes (where the selection starts or ends mid-node) are trimmed using character offsets so only words within the precise selection are included. Because no DOM mutation occurs, the original range stays valid throughout preparation.
 
 ### 6.3 Pick Section (Element Mode)
 
@@ -232,11 +267,9 @@ On page unload, the `beforeunload` handler stops the TTS engine and calls `Highl
 
 ## 8. Theme Detection
 
-The extension icon adapts to the user's system theme without requiring the `scripting` permission. Content scripts and the popup both read the `prefers-color-scheme` media query and send a `themeDetected` message to the background service worker, which switches between light and dark icon sets accordingly. The popup acts as a fallback reporter for tabs where no content script runs (`chrome://`, new tab page, etc.).
+The extension uses a static neutral toolbar icon that works well on both light and dark browser themes. The icon is defined in `manifest.json` and does not change based on system color scheme.
 
-The background service worker caches the last reported value in `chrome.storage.local` under `_iconTheme` and restores it on cold start, so the icon survives service worker idle restarts and browser restarts. On a fresh install with no cached value, the manifest's default icon is shown until the first `themeDetected` message arrives — typically within milliseconds of opening any page or the popup.
-
-The popup and options page apply a `dark` class to the body element based on the same media query, enabling CSS-based dark mode without JavaScript style manipulation.
+The popup and options page apply a `dark` class to the body element based on the `prefers-color-scheme` media query, enabling CSS-based dark mode without JavaScript style manipulation.
 
 ## 9. File Structure
 
@@ -244,15 +277,15 @@ The popup and options page apply a `dark` class to the body element based on the
 listen-carefully/
     manifest.json              Extension manifest (Manifest V3). Includes optional_host_permissions
                                for localhost, requested only when Kokoro is enabled.
-    background.js              Service worker. Icon theming, context menu, Kokoro TTS proxy.
+    background.js              Service worker. Context menu, Kokoro TTS proxy.
                                Imports lib/config.js via importScripts.
     content.js                 Content script orchestrator. Playback lifecycle and messaging.
-    content.css                Injected styles for word highlights and focus mode.
+    content.css                ::highlight() rules for lc-word-active / lc-sentence-active.
     lib/
         config.js              Shared constants and utilities: settings defaults, skip selectors,
                                Kokoro voice formatting, isLocalhostURL, safeSave.
         tts-engine.js          Dual-backend TTS engine (Web Speech API + Kokoro).
-        highlighter.js         DOM word wrapping, index-based highlighting, focus mode.
+        highlighter.js         CSS Custom Highlight API painter, index-based word mapping, focus mode.
         text-extractor.js      Content detection: findMainContent, findContainerFor.
     popup/
         popup.html             Popup markup.
@@ -263,15 +296,9 @@ listen-carefully/
         options.js             Options page logic. Full settings and voice preview.
         options.css            Options page styles.
     icons/
-        icon-16-dark.png       Toolbar icon variants for light and dark themes
-        icon-16-light.png      at 16px, 48px, and 128px sizes.
-        icon-48-dark.png
-        icon-48-light.png
-        icon-128-dark.png
-        icon-128-light.png
-        icon-16.png            Default icon set (dark variant).
-        icon-48.png
-        icon-128.png
+        icon-16-neutral.png    Toolbar icon at 16px, 48px, and 128px sizes.
+        icon-48-neutral.png    Uses a neutral design that works on both light
+        icon-128-neutral.png   and dark browser themes.
 ```
 
 ## 10. Development Notes
@@ -294,7 +321,7 @@ When the extension is reloaded during development, content scripts on already-op
 
 Settings defaults are defined once in `lib/config.js` as the `SETTINGS_DEFAULTS` object. This file is loaded by content scripts (via `manifest.json`), the popup (via `<script>` tag in `popup.html`), the options page (via `<script>` tag in `options.html`), and the background service worker (via `importScripts`). When adding a new setting, update `SETTINGS_DEFAULTS` in `config.js` and it is available everywhere. All storage writes use `safeSave()` from config.js, which logs quota errors to the console.
 
-Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, neon glow, auto-scroll) immediately. Content filtering settings (skip selectors, focus mode, reading mode) are only applied at the start of playback since they require re-wrapping the DOM.
+Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, word marker style, dim style, auto-scroll) immediately. Content filtering settings (skip selectors, focus mode, reading mode) are only applied at the start of playback since they require re-walking the DOM.
 
 ### 10.5 Browser Compatibility
 

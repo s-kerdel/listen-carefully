@@ -86,7 +86,7 @@
 
   function updateProgress(sentenceIndex, totalSentences, wordCount, wordsRead, estimatedSeconds) {
     if (totalSentences <= 0) return;
-    // Word-based progress — accurate even with mixed long paragraphs and short bullets
+    // Word-based progress - accurate even with mixed long paragraphs and short bullets
     const pct = wordCount > 0 ? (wordsRead / wordCount) * 100 : 0;
     els.progressContainer.hidden = false;
     els.progressText.hidden = false;
@@ -270,14 +270,10 @@
   });
 
   // --- Theme detection (class-based fallback for Brave) ---
-  // Also reports the theme to the background service worker so the toolbar
-  // icon stays in sync even on tabs where no content script runs (chrome://,
-  // new tab page, etc.).
+  // Apply dark mode class based on system theme.
   function applyTheme() {
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.body.classList.toggle('dark', isDark);
-    try { chrome.runtime.sendMessage({ type: 'themeDetected', isDark }).catch(() => {}); }
-    catch { /* extension context invalidated */ }
   }
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);

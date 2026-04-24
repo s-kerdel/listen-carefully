@@ -46,24 +46,35 @@
             </select>
           </label>
           <label class="toggle-label">
-            <span>Auto-scroll <span class="hint-inline">keeps the active word in view while reading</span></span>
-            <input type="checkbox" id="auto-scroll" role="switch" checked>
-            <span class="toggle-switch" aria-hidden="true"></span>
+            <span>Dim style <span class="hint-inline">how the active text is emphasized</span></span>
+            <select id="focus-dim-style" class="inline-select" aria-label="Dim style">
+              <option value="dim">Fade surroundings (keep original colors)</option>
+              <option value="band">Color band (use highlight color)</option>
+            </select>
           </label>
           <label class="toggle-label">
-            <span>Neon glow</span>
-            <input type="checkbox" id="neon-highlight" role="switch">
+            <span>Word marker <span class="hint-inline">how the active word is indicated</span></span>
+            <select id="word-marker-style" class="inline-select" aria-label="Word marker style">
+              <option value="color-underline">Colored word + underline</option>
+              <option value="color-underline-continuous">Colored word + continuous underline</option>
+              <option value="color">Colored word only</option>
+              <option value="bg-only">Mark word background</option>
+            </select>
+          </label>
+          <label class="toggle-label">
+            <span>Matching underline color <span class="hint-inline">underline uses primary color instead of secondary</span></span>
+            <input type="checkbox" id="matching-underline" role="switch" checked>
             <span class="toggle-switch" aria-hidden="true"></span>
           </label>
         </div>
         <div class="color-row">
           <div class="color-group">
-            <label for="highlight-bg">Background</label>
-            <input type="color" id="highlight-bg" aria-label="Highlight background color" value="#7CF145">
+            <label for="highlight-bg">Primary color</label>
+            <input type="color" id="highlight-bg" aria-label="Primary highlight color" value="#7CF145">
           </div>
           <div class="color-group">
-            <label for="highlight-fg">Text Color</label>
-            <input type="color" id="highlight-fg" aria-label="Highlight text color" value="#000000">
+            <label for="highlight-fg">Secondary color</label>
+            <input type="color" id="highlight-fg" aria-label="Secondary highlight color (text on primary in Mark word background mode)" value="#000000">
           </div>
         </div>
         <div class="preset-row">
@@ -76,7 +87,12 @@
           <button class="preset" data-bg="#003B6F" data-fg="#FFFFFF" aria-label="Tardis highlight preset"><span style="background:#003B6F;color:#FFFFFF">Tardis</span></button>
         </div>
         <div class="preview-box" id="highlight-preview">
-          This is how <span>highlighted</span> words will look
+          <p class="preview-line preview-para-active">
+            <span class="preview-sentence-other">An intro sentence sits before the active one.</span><br>
+            <span class="preview-sentence-active"><span class="preview-vline-active">The active <span class="preview-word">paragraph</span> marks the currently spoken word,</span><br><span class="preview-vline-trailing">and this sentence wraps to another visual line.</span></span><br>
+            <span class="preview-sentence-other">A trailing sentence sits after.</span>
+          </p>
+          <p class="preview-line preview-para-other">Another paragraph fades whenever focus mode is enabled.</p>
         </div>
       </div>
     </section>
@@ -139,6 +155,13 @@
             <input type="range" id="pitch" min="0.5" max="2.0" step="0.1" value="1.0">
             <span class="slider-value" id="pitch-value">1.0</span>
           </div>
+        </div>
+        <div class="toggles">
+          <label class="toggle-label">
+            <span>Auto-scroll <span class="hint-inline">keeps the active word in view while reading</span></span>
+            <input type="checkbox" id="auto-scroll" role="switch" checked>
+            <span class="toggle-switch" aria-hidden="true"></span>
+          </label>
         </div>
       </div>
     </section>

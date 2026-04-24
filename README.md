@@ -6,9 +6,9 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 
 ## Features
 
-1. **Word-level highlighting.** The currently spoken word is highlighted directly on the page with configurable colors and an optional neon glow effect.
+1. **Word-level highlighting.** The currently spoken word is highlighted directly on the page with configurable colors and a choice of marker styles (colored word + underline, colored word only, or classic marked background). Highlighting uses the CSS Custom Highlight API, so the page DOM is never mutated - framework-managed pages (Vue, React, Nuxt, etc.) keep working normally while TTS is active.
 2. **Multiple reading modes.** Full page, selected text, pick a section, or read from a specific point on the page.
-3. **Focus mode.** Dims the surrounding text to show only the active text block, sentence, or line, designed for users who benefit from reduced visual noise.
+3. **Focus mode.** Dims the surrounding text to show only the active text block, sentence, or line. Choose between **Fade surroundings** (non-active text fades, active text keeps its original page color) and **Color band** (active text paints in your highlight color) for different levels of emphasis.
 4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse. Shortcuts use `stopPropagation` to prevent conflicts with site access keys.
 5. **Voice selection.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language.
 6. **Kokoro TTS support.** Optionally connect to a local [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server for higher quality voices with word-level timestamps. Supports 67 voices across 9 languages. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
@@ -93,7 +93,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, neon glow toggle, content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active sentence or active line), auto-scroll toggle, and per-site CSS selector overrides for content detection. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
+Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, speed, volume, pitch (browser only), highlight colors with presets, word marker style (colored word + underline, colored word only, or marked background), content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active text, active sentence, or active line) with configurable dim style, auto-scroll toggle, and per-site CSS selector overrides for content detection. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
 
 ## Technical documentation
 
