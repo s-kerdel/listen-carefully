@@ -1,26 +1,51 @@
-/* Listen Carefully - content script styles */
+/* Listen Carefully - content script styles.
+ * Uses the CSS Custom Highlight API; the page DOM is never mutated. */
 
-.tts-word {
-  border-radius: 3px;
-  padding: 0 3px;
-  margin: 0 -1px;
+/* Base rule: 'bg-only' marker. !important guards against 'band' focus
+ * dim, which sets the originating element's color !important. */
+::highlight(lc-word-active) {
+  background-color: var(--lc-hl-bg, #FFEB3B) !important;
+  color: var(--lc-hl-fg, #000000) !important;
 }
 
-/* Focus mode: dim all words, fade transition only when dimming is active */
-.tts-reading .tts-word {
-  opacity: 0.2;
-  transition: opacity 0.2s ease;
+::highlight(lc-sentence-active) {
+  background-color: color-mix(in srgb, var(--lc-hl-bg, #FFEB3B) 18%, transparent) !important;
+  color: var(--lc-sentence-color, currentColor) !important;
 }
 
-/* Current sentence: fully visible */
-.tts-reading .tts-word.tts-sentence-active {
-  opacity: 1;
+::highlight(lc-dim) {
+  color: rgba(128, 128, 128, 0.55) !important;
 }
 
-/* Current word: highlighted — transition only on this single element */
-.tts-word-active {
-  opacity: 1 !important;
-  background-color: #FFEB3B;
-  color: #000000;
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+/* Colored-word markers: word text uses the primary colour. The underline
+ * uses --lc-underline-color which defaults to the primary - "matching
+ * underline" - and is set to --lc-hl-fg by the highlighter when the user
+ * toggles the matching setting off. */
+.lc-word-color ::highlight(lc-word-active) {
+  background-color: transparent !important;
+  color: var(--lc-hl-bg, #FFEB3B) !important;
+}
+
+.lc-word-color-underline ::highlight(lc-word-active) {
+  background-color: transparent !important;
+  color: var(--lc-hl-bg, #FFEB3B) !important;
+  text-decoration: underline var(--lc-underline-color, var(--lc-hl-bg, #FFEB3B)) solid 3px !important;
+  text-underline-offset: 2px !important;
+}
+
+/* Same as lc-word-color-underline but with skip-ink off, so the line
+ * runs straight through descenders (g, q, p) instead of being broken. */
+.lc-word-color-underline-continuous ::highlight(lc-word-active) {
+  background-color: transparent !important;
+  color: var(--lc-hl-bg, #FFEB3B) !important;
+  text-decoration: underline var(--lc-underline-color, var(--lc-hl-bg, #FFEB3B)) solid 3px !important;
+  text-decoration-skip-ink: none !important;
+  text-underline-offset: 2px !important;
+}
+
+/* 'band' focus dim. `*` + !important is needed to beat utility-class
+ * color rules (Tailwind etc.) on framework pages. */
+.lc-focus-active,
+.lc-focus-active * {
+  color: rgba(128, 128, 128, 0.55) !important;
 }

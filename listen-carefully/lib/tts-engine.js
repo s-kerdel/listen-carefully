@@ -95,17 +95,41 @@ class TTSEngine {
     'kokoroEndpoint', 'kokoroVoice',
   ];
 
+  // Numeric settings with [min, max] clamps. Values outside the range -
+  // or non-numeric values from a corrupted chrome.storage.local payload -
+  // are coerced to the nearest bound (or to the default if NaN).
+  static _NUMERIC_RANGES = {
+    rate: [0.5, 3.0],
+    pitch: [0.5, 2.0],
+    volume: [0.0, 1.0],
+  };
+
   // Spoken expansions for leading non-word prefixes in Kokoro text.
   // Prevents timestamp truncation while keeping symbols audible.
   static _PREFIX_MAP = { '/': 'slash', '@': 'at', '#': 'hash' };
+
+  static _coerceNumeric(key, value, fallback) {
+    const range = TTSEngine._NUMERIC_RANGES[key];
+    if (!range) return value;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(range[1], Math.max(range[0], n));
+  }
 
   updateSettings(settings) {
     const wasPlaying = this.state === 'playing';
     const prev = { ...this.settings };
 
-    // Allowlist keys to prevent prototype pollution
+    // Allowlist keys to prevent prototype pollution. Numeric settings are
+    // coerced + clamped so malformed values from storage cannot propagate
+    // as NaN into the Web Speech API (where they'd silently break playback).
     for (const k of TTSEngine._SETTINGS_KEYS) {
-      if (k in settings) this.settings[k] = settings[k];
+      if (!(k in settings)) continue;
+      if (k in TTSEngine._NUMERIC_RANGES) {
+        this.settings[k] = TTSEngine._coerceNumeric(k, settings[k], this.settings[k]);
+      } else {
+        this.settings[k] = settings[k];
+      }
     }
 
     // Check if anything actually changed
@@ -211,17 +235,17 @@ class TTSEngine {
         if (this._audioCtx && this._audioCtx.state === 'suspended') this._audioCtx.resume();
         this._resumeWordTimer();
       } else if (this._pendingSkip) {
-        // Skip was pending when paused — play the skipped-to sentence
+        // Skip was pending when paused - play the skipped-to sentence
         this._pendingSkip = false;
         clearTimeout(this._skipDebounce);
         this._speakNextKokoro();
       } else {
-        // Audio finished while paused — advance to next sentence
+        // Audio finished while paused - advance to next sentence
         this._speakNext();
       }
     } else {
       speechSynthesis.resume();
-      // Utterance may have finished while paused — if so, resume does nothing.
+      // Utterance may have finished while paused - if so, resume does nothing.
       // Detect this: if speechSynthesis is no longer speaking/pending after a
       // short tick, the utterance ended during pause and we need to advance.
       setTimeout(() => {
@@ -270,7 +294,7 @@ class TTSEngine {
   /** Instant visual feedback + debounced Kokoro fetch for skip operations.
    *  Prevents GPU-heavy TTS requests during rapid skipping. */
   _skipToCurrentSentence() {
-    // Visual feedback is immediate — highlight jumps to the new sentence
+    // Visual feedback is immediate - highlight jumps to the new sentence
     if (this.onSentenceStart) this.onSentenceStart(this.currentIndex);
 
     if (this._isKokoro) {
@@ -486,7 +510,7 @@ class TTSEngine {
 
     audio.onerror = () => {
       if (this._audio !== audio) return;
-      console.info('Kokoro: Audio element blocked by page CSP — using AudioContext fallback');
+      console.info('Kokoro: Audio element blocked by page CSP - using AudioContext fallback');
       this._clearWordTimer();
       this._revokeBlobUrl();
       this._audio = null;
@@ -496,7 +520,7 @@ class TTSEngine {
 
     audio.play().catch((err) => {
       if (err.name === 'AbortError' || this._audio !== audio) return;
-      console.info('Kokoro: audio.play() blocked by page CSP — using AudioContext fallback');
+      console.info('Kokoro: audio.play() blocked by page CSP - using AudioContext fallback');
       this._clearWordTimer();
       this._revokeBlobUrl();
       this._audio = null;
@@ -512,7 +536,7 @@ class TTSEngine {
 
       const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
 
-      // Async boundary — re-check cancel/state
+      // Async boundary - re-check cancel/state
       if (this._cancelGen !== gen) return;
       if (this.state !== 'playing' || this.currentIndex !== sentenceIndex) return;
 
@@ -663,7 +687,7 @@ class TTSEngine {
         : this._audioCtx.currentTime - this._playbackStartTime;
       const ts = this._wordTimestamps;
 
-      // Forward scan from last position — audio time only moves forward,
+      // Forward scan from last position - audio time only moves forward,
       // so we never need to re-check earlier timestamps.
       // Advance at most 1 word per tick so every word gets at least one
       // frame of highlight even when timestamps are clustered/duplicated.
@@ -684,7 +708,7 @@ class TTSEngine {
     this._wordTimerRAF = requestAnimationFrame(tick);
   }
 
-  /** Restart the RAF loop after pause — preserves highlight position. */
+  /** Restart the RAF loop after pause - preserves highlight position. */
   _resumeWordTimer() {
     if (!this._wordPositions.length || (!this._audio && !this._sourceNode)) return;
     this._startWordSync(this._wordTimerSentence, false);

@@ -3,9 +3,9 @@
  * Runs in the page context where speechSynthesis is available.
  *
  * Key design: the Highlighter is the single source of truth for the word list.
- * Sentences are built from the actual wrapped spans (getSentences()), so the
- * sentence word count is always identical to the span count. Highlighting maps
- * by index, never by text matching, so pauses/punctuation cannot cause drift.
+ * Words are recorded as text-node slice references without mutating the DOM;
+ * sentences are built from that list (getSentences()). Highlighting maps by
+ * index, never by text matching, so pauses/punctuation cannot cause drift.
  */
 
 (function () {
@@ -27,8 +27,6 @@
     } catch { /* extension context invalidated */ }
   }
 
-  // SKIP_SELECTORS loaded from lib/config.js
-
   // --- Wire up TTS engine callbacks ---
   // All callbacks are guarded: after extension reload the context is invalidated
   // but the TTS engine (speechSynthesis) keeps firing events on the old page.
@@ -43,7 +41,7 @@
 
   engine.onSentenceStart = safeCall((sentenceIndex) => {
     highlighter.highlightWord(0, 0, sentenceIndex);
-    const wordCount = highlighter.wordSpans.length;
+    const wordCount = highlighter.words.length;
     const wordsPerMin = 150 * engine.settings.rate;
     const wordsRead = highlighter.sentenceMap[sentenceIndex]?.startWordIndex || 0;
     sendMsg({
@@ -87,8 +85,10 @@
           highlighter.updateSettings({
             highlightBg: settings.highlightBg,
             highlightFg: settings.highlightFg,
-            neonHighlight: settings.neonHighlight,
             autoScroll: settings.autoScroll,
+            focusDimStyle: settings.focusDimStyle,
+            wordMarkerStyle: settings.wordMarkerStyle,
+            matchingUnderline: settings.matchingUnderline,
           });
           resolve(settings);
         });
@@ -112,18 +112,18 @@
   // --- Core playback (used by ALL modes) ---
 
   /**
-   * @param {Element} container - DOM element whose words to wrap
+   * @param {Element} container - DOM element whose words to read
    * @param {Object}  settings  - user settings
    * @param {Range}   [range]   - if provided, only read words within this Range (selection mode)
    */
   function startPlayback(container, settings, range) {
-    // Cancel element picker if active — prevents stale click listener
+    // Cancel element picker if active - prevents stale click listener
     if (_activePickerCleanup) _activePickerCleanup();
 
     const skipSelectors = buildSkipSelectors(settings);
 
-    // Wrap words - if range is provided, only spans from text nodes
-    // intersecting the range are kept (selection mode filtering at DOM level)
+    // Record words - if range is provided, only words from text nodes
+    // intersecting the range are kept (selection mode filtering)
     // Backward compat: convert old boolean focusMode to string
     const fm = settings.focusMode === true ? 'sentence' : (settings.focusMode || 'off');
     highlighter.focusMode = fm;
@@ -183,7 +183,7 @@
         sendMsg({ type: 'error', message: 'No text selected. Select some text first.' });
         return;
       }
-      // Use commonAncestor as container — guarantees it contains the full selection
+      // Use commonAncestor as container - guarantees it contains the full selection
       const ancestor = selectionRange.commonAncestorContainer;
       container = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
     } else {
@@ -205,14 +205,17 @@
     // Cancel any previous picker to prevent stacking click listeners
     if (_activePickerCleanup) _activePickerCleanup();
 
-    document.body.style.cursor = 'crosshair';
+    // Content scripts run at document_idle, so document.body is normally
+    // present - but guard anyway in case a page removed it or we were
+    // invoked during an unusual navigation state.
+    if (document.body) document.body.style.cursor = 'crosshair';
     sendMsg({ type: 'stateChanged', state: 'picking' });
 
     const onClick = async (e) => {
       e.preventDefault();
       e.stopPropagation();
       document.removeEventListener('click', onClick, true);
-      document.body.style.cursor = '';
+      if (document.body) document.body.style.cursor = '';
       _activePickerCleanup = null;
 
       try {
@@ -247,7 +250,7 @@
 
     _activePickerCleanup = () => {
       document.removeEventListener('click', onClick, true);
-      document.body.style.cursor = '';
+      if (document.body) document.body.style.cursor = '';
       _activePickerCleanup = null;
     };
 
@@ -311,7 +314,7 @@
         break;
 
       case 'getState': {
-        const wordCount = highlighter.wordSpans ? highlighter.wordSpans.length : 0;
+        const wordCount = highlighter.words ? highlighter.words.length : 0;
         const wordsPerMin = 150 * engine.settings.rate;
         const si = engine.getCurrentSentenceIndex();
         const wordsRead = highlighter.sentenceMap?.[si]?.startWordIndex || 0;
@@ -348,7 +351,8 @@
             engine.updateSettings(msg.settings);
           }
           if (has('highlightBg') || has('highlightFg') ||
-              has('neonHighlight') || has('autoScroll')) {
+              has('autoScroll') || has('focusDimStyle') ||
+              has('wordMarkerStyle') || has('matchingUnderline')) {
             highlighter.updateSettings(msg.settings);
           }
         }
@@ -459,15 +463,6 @@
     }
     return textNode ? (textNode.parentElement || info.target) : info.target;
   }
-
-  // --- Theme-aware icon ---
-
-  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  function sendTheme() {
-    sendMsg({ type: 'themeDetected', isDark: darkQuery.matches });
-  }
-  sendTheme();
-  darkQuery.addEventListener('change', sendTheme);
 
   // --- Cleanup on page unload ---
 

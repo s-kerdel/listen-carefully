@@ -7,13 +7,10 @@
 
   // Theme detection (class-based for Brave compatibility).
   // Also reports the theme to the background service worker so the toolbar
-  // icon stays in sync even when the user opens the options page directly
-  // without first visiting a normal tab or opening the popup.
+  // Apply dark mode class based on system theme.
   function applyTheme() {
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.body.classList.toggle('dark', isDark);
-    try { chrome.runtime.sendMessage({ type: 'themeDetected', isDark }).catch(() => {}); }
-    catch { /* extension context invalidated */ }
   }
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
@@ -42,8 +39,10 @@
     skipAlt: document.getElementById('skip-alt'),
     skipLinks: document.getElementById('skip-links'),
     punctuationPauses: document.getElementById('punctuation-pauses'),
-    neonHighlight: document.getElementById('neon-highlight'),
     focusMode: document.getElementById('focus-mode'),
+    focusDimStyle: document.getElementById('focus-dim-style'),
+    wordMarkerStyle: document.getElementById('word-marker-style'),
+    matchingUnderline: document.getElementById('matching-underline'),
     autoScroll: document.getElementById('auto-scroll'),
     siteList: document.getElementById('site-list'),
     siteHostname: document.getElementById('site-hostname'),
@@ -170,7 +169,7 @@
         els.kokoroVoice.appendChild(optgroup);
       }
 
-      // Voices that don't match the pattern — show raw ID
+      // Voices that don't match the pattern - show raw ID
       for (const v of ungrouped) {
         const opt = document.createElement('option');
         opt.value = v;
@@ -238,11 +237,14 @@
     els.skipCode.checked = s.skipCodeBlocks;
     els.skipAlt.checked = s.skipAltText;
     els.skipLinks.checked = s.skipLinks;
-    els.neonHighlight.checked = s.neonHighlight;
     els.punctuationPauses.checked = s.punctuationPauses;
     // Backward compat: convert old boolean focusMode to string
     const fm = s.focusMode === true ? 'sentence' : (s.focusMode || 'off');
     els.focusMode.value = fm;
+    els.focusDimStyle.value = (s.focusDimStyle === 'band') ? 'band' : 'dim';
+    const validMarkers = ['color-underline', 'color-underline-continuous', 'color', 'bg-only'];
+    els.wordMarkerStyle.value = validMarkers.includes(s.wordMarkerStyle) ? s.wordMarkerStyle : 'color-underline';
+    els.matchingUnderline.checked = s.matchingUnderline !== false;
     els.autoScroll.checked = s.autoScroll;
     _siteSelectors = s.siteSelectors || {};
     renderSiteSelectors();
@@ -252,17 +254,70 @@
   // --- Highlight preview ---
 
   function updatePreview() {
-    const span = els.highlightPreview.querySelector('span');
-    span.style.borderRadius = '3px';
-    span.style.padding = '0 3px';
+    const word = els.highlightPreview.querySelector('.preview-word');
+    const activeSentence = els.highlightPreview.querySelector('.preview-sentence-active');
+    const vlineActive = els.highlightPreview.querySelector('.preview-vline-active');
+    const vlineTrailing = els.highlightPreview.querySelector('.preview-vline-trailing');
+    const otherSentences = els.highlightPreview.querySelectorAll('.preview-sentence-other');
+    const activePara = els.highlightPreview.querySelector('.preview-para-active');
+    const otherPara = els.highlightPreview.querySelector('.preview-para-other');
     const bg = validHex(els.highlightBg.value) || SETTINGS_DEFAULTS.highlightBg;
     const fg = validHex(els.highlightFg.value) || SETTINGS_DEFAULTS.highlightFg;
-    span.style.backgroundColor = bg;
-    span.style.color = fg;
-    if (els.neonHighlight.checked) {
-      span.style.boxShadow = `0 0 4px ${bg}80, 0 0 9px ${bg}80, 0 0 18px ${bg}80, 0 2px 8px rgba(0,0,0,0.3)`;
+
+    for (const el of [word, activeSentence, vlineActive, vlineTrailing, activePara, otherPara, ...otherSentences]) {
+      el.style.cssText = '';
+    }
+
+    // Active-word marker.
+    const marker = els.wordMarkerStyle.value;
+    if (marker === 'color') {
+      word.style.color = bg;
+    } else if (marker === 'color-underline' || marker === 'color-underline-continuous') {
+      word.style.color = bg;
+      const underlineColor = els.matchingUnderline.checked ? bg : fg;
+      word.style.textDecoration = `underline ${underlineColor} solid 3px`;
+      word.style.textUnderlineOffset = '2px';
+      if (marker === 'color-underline-continuous') {
+        word.style.textDecorationSkipInk = 'none';
+      }
     } else {
-      span.style.boxShadow = '';
+      word.style.backgroundColor = bg;
+      word.style.color = fg;
+    }
+
+    // Focus mode + dim style.
+    //   text     - active paragraph stays, other paragraphs dim
+    //   sentence - only active sentence stays (both visual lines), the rest dims
+    //   line     - only active visual line stays, same-sentence overflow also dims
+    const fm = els.focusMode.value;
+    if (fm === 'off') return;
+
+    const DIM = 'rgba(128, 128, 128, 0.55)';
+    const BAND = `color-mix(in srgb, ${bg} 18%, transparent)`;
+    const band = els.focusDimStyle.value === 'band';
+
+    if (fm === 'text') {
+      otherPara.style.color = DIM;
+      if (band) {
+        activePara.style.backgroundColor = BAND;
+        activePara.style.color = fg;
+      }
+    } else if (fm === 'sentence') {
+      for (const s of otherSentences) s.style.color = DIM;
+      otherPara.style.color = DIM;
+      if (band) {
+        activeSentence.style.backgroundColor = BAND;
+        activeSentence.style.color = fg;
+      }
+    } else {
+      // line
+      for (const s of otherSentences) s.style.color = DIM;
+      otherPara.style.color = DIM;
+      vlineTrailing.style.color = DIM;
+      if (band) {
+        vlineActive.style.backgroundColor = BAND;
+        vlineActive.style.color = fg;
+      }
     }
   }
 
@@ -375,7 +430,7 @@
       audio.onerror = revoke;
       audio.play().catch(revoke);
 
-      els.kokoroTestResult.textContent = 'Connected — playing test audio...';
+      els.kokoroTestResult.textContent = 'Connected - playing test audio...';
       els.kokoroTestResult.className = 'test-result success';
     } catch (err) {
       els.kokoroTestResult.textContent = `Test failed: ${err.message}`;
@@ -421,15 +476,26 @@
     updatePreview();
   });
 
-  els.neonHighlight.addEventListener('change', () => {
-    save({ neonHighlight: els.neonHighlight.checked });
-    updatePreview();
-  });
   els.skipCode.addEventListener('change', () => save({ skipCodeBlocks: els.skipCode.checked }));
   els.skipAlt.addEventListener('change', () => save({ skipAltText: els.skipAlt.checked }));
   els.skipLinks.addEventListener('change', () => save({ skipLinks: els.skipLinks.checked }));
   els.punctuationPauses.addEventListener('change', () => save({ punctuationPauses: els.punctuationPauses.checked }));
-  els.focusMode.addEventListener('change', () => save({ focusMode: els.focusMode.value }));
+  els.focusMode.addEventListener('change', () => {
+    save({ focusMode: els.focusMode.value });
+    updatePreview();
+  });
+  els.focusDimStyle.addEventListener('change', () => {
+    save({ focusDimStyle: els.focusDimStyle.value });
+    updatePreview();
+  });
+  els.wordMarkerStyle.addEventListener('change', () => {
+    save({ wordMarkerStyle: els.wordMarkerStyle.value });
+    updatePreview();
+  });
+  els.matchingUnderline.addEventListener('change', () => {
+    save({ matchingUnderline: els.matchingUnderline.checked });
+    updatePreview();
+  });
   els.autoScroll.addEventListener('change', () => save({ autoScroll: els.autoScroll.checked }));
 
   els.btnReset.addEventListener('click', () => {
@@ -470,10 +536,26 @@
     }
   }
 
+  // Caps chosen to stay comfortably inside chrome.storage.local's 10MB
+  // quota even if the user pastes extreme values, while exceeding any
+  // realistic hostname / selector length.
+  const MAX_SITE_ENTRIES = 500;
+  const MAX_HOST_LENGTH = 253;    // DNS hostname max
+  const MAX_SELECTOR_LENGTH = 1024;
+
   els.btnAddSite.addEventListener('click', () => {
     const host = els.siteHostname.value.trim().toLowerCase();
     const selector = els.siteSelector.value.trim();
     if (!host || !selector) return;
+    if (host.length > MAX_HOST_LENGTH || selector.length > MAX_SELECTOR_LENGTH) {
+      console.warn('Listen Carefully: site entry rejected - value exceeds length cap.');
+      return;
+    }
+    // Guard against runaway storage from repeated additions.
+    if (!(host in _siteSelectors) && Object.keys(_siteSelectors).length >= MAX_SITE_ENTRIES) {
+      console.warn(`Listen Carefully: site selector limit (${MAX_SITE_ENTRIES}) reached.`);
+      return;
+    }
     _siteSelectors[host] = selector;
     save({ siteSelectors: _siteSelectors });
     els.siteHostname.value = '';

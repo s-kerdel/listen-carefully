@@ -524,16 +524,23 @@ input[type="color"]:hover {
 
 /* --- Preview box --- */
 .preview-box {
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  text-align: center;
   background: var(--bg-input);
+  font-size: 18px;
+  line-height: 1.5;
 }
 
-.preview-box span {
-  padding: 3px 6px;
-  border-radius: 3px;
+.preview-box .preview-line {
+  margin: 0 0 8px;
+}
+
+.preview-box .preview-line:last-child {
+  margin-bottom: 0;
+}
+
+.preview-box .preview-word {
   font-weight: 500;
 }
 

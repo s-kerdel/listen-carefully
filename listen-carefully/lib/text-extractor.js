@@ -11,7 +11,7 @@ function findMainContent(siteSelector) {
   // User-defined per-site selector takes priority over all heuristics
   if (siteSelector) {
     try { const custom = document.querySelector(siteSelector); if (custom) return custom; }
-    catch { /* invalid selector — fall through to heuristics */ }
+    catch { /* invalid selector - fall through to heuristics */ }
   }
 
   // Try semantic elements first (broad set of common CMS/framework patterns)
@@ -86,7 +86,7 @@ function findContainerFor(el, siteSelector) {
   // 0. User-defined per-site selector
   if (siteSelector) {
     try { const custom = document.querySelector(siteSelector); if (custom) return custom; }
-    catch { /* invalid selector — fall through to heuristics */ }
+    catch { /* invalid selector - fall through to heuristics */ }
   }
 
   // 1. Semantic container closest to the element
