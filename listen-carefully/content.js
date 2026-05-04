@@ -69,6 +69,20 @@
 
   // --- Load settings from storage ---
 
+  /**
+   * Whether the active browser voice lacks word-boundary support.
+   * When voiceURI is null (auto-pick failed because every installed voice
+   * is in the limited list - e.g. Linux with only Google voices), the
+   * browser will use its system default voice at speak time, so we check
+   * that voice instead.
+   */
+  function isLimitedVoiceActive() {
+    if (engine.settings.ttsBackend !== 'browser') return false;
+    const v = engine.voices.find(x => x.voiceURI === engine.settings.voiceURI)
+           || engine.voices.find(x => x.default);
+    return !!(v && isLimitedVoice(v));
+  }
+
   function loadSettings() {
     return new Promise((resolve) => {
       try {
@@ -89,6 +103,7 @@
             focusDimStyle: settings.focusDimStyle,
             wordMarkerStyle: settings.wordMarkerStyle,
             matchingUnderline: settings.matchingUnderline,
+            suppressWordMarker: isLimitedVoiceActive(),
           });
           resolve(settings);
         });
@@ -346,14 +361,23 @@
       case 'updateSettings':
         if (msg.settings) {
           const has = (k) => msg.settings[k] !== undefined;
-          if (has('voiceURI') || has('rate') || has('pitch') || has('volume') ||
-              has('ttsBackend') || has('kokoroEndpoint') || has('kokoroVoice')) {
+          const engineKeysChanged = has('voiceURI') || has('rate') || has('pitch')
+            || has('volume') || has('ttsBackend') || has('kokoroEndpoint')
+            || has('kokoroVoice');
+          if (engineKeysChanged) {
             engine.updateSettings(msg.settings);
           }
-          if (has('highlightBg') || has('highlightFg') ||
-              has('autoScroll') || has('focusDimStyle') ||
-              has('wordMarkerStyle') || has('matchingUnderline')) {
-            highlighter.updateSettings(msg.settings);
+          const highlighterKeysChanged = has('highlightBg') || has('highlightFg')
+            || has('autoScroll') || has('focusDimStyle')
+            || has('wordMarkerStyle') || has('matchingUnderline');
+          // Voice / backend changes also affect the word marker (Google
+          // voices suppress it). Recompute and forward to the highlighter
+          // even when no highlighter-specific keys were in the broadcast.
+          if (highlighterKeysChanged || has('voiceURI') || has('ttsBackend')) {
+            highlighter.updateSettings({
+              ...msg.settings,
+              suppressWordMarker: isLimitedVoiceActive(),
+            });
           }
         }
         break;

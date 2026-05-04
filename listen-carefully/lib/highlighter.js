@@ -44,6 +44,11 @@ class Highlighter {
       focusDimStyle: 'dim',
       wordMarkerStyle: 'color-underline',
       matchingUnderline: true,
+      // Suppress the per-word marker entirely (sentence/text/line focus
+      // still applies). Set when a voice in _LIMITED_VOICE_PATTERNS
+      // (config.js) is active, since those do not fire word boundary
+      // events - the marker would freeze on the first word otherwise.
+      suppressWordMarker: false,
     };
 
     this._supported = typeof CSS !== 'undefined'
@@ -65,11 +70,12 @@ class Highlighter {
     return /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$/.test(str) ? str : null;
   }
 
-  static _SETTINGS_KEYS = ['highlightBg', 'highlightFg', 'autoScroll', 'focusDimStyle', 'wordMarkerStyle', 'matchingUnderline'];
+  static _SETTINGS_KEYS = ['highlightBg', 'highlightFg', 'autoScroll', 'focusDimStyle', 'wordMarkerStyle', 'matchingUnderline', 'suppressWordMarker'];
 
   updateSettings(settings) {
     const prevDimStyle = this.settings.focusDimStyle;
     const prevMarkerStyle = this.settings.wordMarkerStyle;
+    const prevSuppress = this.settings.suppressWordMarker;
     for (const k of Highlighter._SETTINGS_KEYS) {
       if (!(k in settings)) continue;
       if (k === 'highlightBg' || k === 'highlightFg') {
@@ -82,6 +88,8 @@ class Highlighter {
           ? settings[k] : 'color-underline';
       } else if (k === 'matchingUnderline') {
         this.settings[k] = settings[k] !== false;
+      } else if (k === 'suppressWordMarker') {
+        this.settings[k] = !!settings[k];
       } else {
         this.settings[k] = settings[k];
       }
@@ -91,7 +99,8 @@ class Highlighter {
     // Repaint mid-playback when a style toggle that affects rendering flipped.
     if (this.currentWordIndex >= 0
         && (this.settings.focusDimStyle !== prevDimStyle
-          || this.settings.wordMarkerStyle !== prevMarkerStyle)) {
+          || this.settings.wordMarkerStyle !== prevMarkerStyle
+          || this.settings.suppressWordMarker !== prevSuppress)) {
       this._refreshFocusClass();
       this._applyHighlight(this.currentWordIndex);
     }
@@ -238,7 +247,16 @@ class Highlighter {
             include = afterStart && beforeEnd;
           }
           if (include) {
-            this.words.push({ node: textNode, start, end, block, text: part });
+            // Attach pure-punctuation tail to the previous word so a stray
+            // `.` from `<code>X</code>.` doesn't become its own token -
+            // sentence detection needs it on the word, and Kokoro pre-clean
+            // drops standalone punctuation tokens.
+            const prev = this.words[this.words.length - 1];
+            if (!/\w/.test(part) && prev && prev.block === block) {
+              prev.text += part;
+            } else {
+              this.words.push({ node: textNode, start, end, block, text: part });
+            }
           }
         }
         charPos += part.length;
@@ -431,7 +449,12 @@ class Highlighter {
     const wordRange = this._makeRange(w.node, w.start, w.end);
     if (!wordRange) return;
 
-    this._wordHL.add(wordRange);
+    // Limited voices have no boundary events - track currentWordIndex for
+    // sentence/line focus context, but skip the word marker since it
+    // would freeze on the first word.
+    if (!this.settings.suppressWordMarker) {
+      this._wordHL.add(wordRange);
+    }
     this.currentWordIndex = wordIndex;
 
     // Active context window: the sentence, text block, or visual line

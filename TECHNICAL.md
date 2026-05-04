@@ -24,7 +24,7 @@ Files: `content.js`, `lib/config.js`, `lib/tts-engine.js`, `lib/highlighter.js`,
 
 These five files are injected into every page via the `content_scripts` manifest entry. They run in an isolated world, meaning they share the page's DOM but not its JavaScript scope. The `speechSynthesis` API is only available in this context, not in the service worker.
 
-`lib/config.js` is loaded first and defines shared constants (`SETTINGS_DEFAULTS`, `SKIP_SELECTORS`, Kokoro voice formatting) and shared utilities (`isLocalhostURL`, `safeSave`) used by all other scripts. It is also loaded by the popup and options page via `<script>` tags, and by the background service worker via `importScripts`.
+`lib/config.js` is loaded first and defines shared constants (`SETTINGS_DEFAULTS`, `SKIP_SELECTORS`, Kokoro voice formatting) and shared utilities (`isLocalhostURL`, `safeSave`, voice availability + auto-pick helpers `isLimitedVoice` / `getUserLangTags` / `pickDefaultVoice` / `filterVoicesForDropdown`) used by all other scripts. It is also loaded by the popup and options page via `<script>` tags, and by the background service worker via `importScripts`.
 
 `content.js` is the orchestrator. It wires up callbacks between the engine and highlighter, handles all incoming messages from the popup and background script, registers keyboard shortcuts, and manages the reading lifecycle.
 
@@ -74,11 +74,34 @@ The `/dev/captioned_speech` endpoint returns base64-encoded audio alongside a `t
 
 Word highlighting is synchronized via a `requestAnimationFrame` loop that reads the playback time (`audio.currentTime` or `AudioContext.currentTime` offset) and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
 
-Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`). The timestamp mapping uses a forward scan with text-matching lookahead to re-sync after expanded tokens. Punctuation-only API entries (commas, periods) are skipped in the scan, but their timing gaps are preserved because the next word's `start_time` is naturally after the pause.
+Kokoro normalizes text before synthesis (e.g. `"42"` becomes `"forty-two"`, `"$50"` becomes `"fifty dollars"`) and splits paths into multiple tokens (`"/etc/cron.daily"` → `["slash","etc","slash","cron-daily"]`, where the first slash comes from our pre-clean injection and the second is Kokoro pronouncing the internal `/`). Punctuation-only API entries (commas, periods, parens) are filtered out before alignment; their timing gaps are preserved because the next content word's `start_time` is naturally after the pause.
 
-Before sending text to Kokoro, the engine cleans tokens that start with non-word characters (e.g. `-a`, `/all`, `>`). Kokoro's timestamp generator truncates at these tokens - it continues generating audio but stops emitting word boundaries. Known prefixes are expanded to spoken forms (`/` → "slash", `@` → "at", `#` → "hash") via `_PREFIX_MAP`; unknown prefixes are stripped (e.g. `-a` → `"a"`). The original (uncleaned) sentence text is retained for `_computeWordPositions` so that highlight charIndex mapping still resolves to the correct DOM spans. The `_buildWordTimestamps` lookahead handles the mismatch by stripping non-word characters from both sides before comparison.
+`_buildWordTimestamps` aligns each text position to its starting API token via a windowed lookahead. The next text token's cleaned form is matched against API tokens by accumulating `apiClean[j..k]` and allowing up to `MAX_SKIPS` non-fitting tokens (the pre-clean / internal slashes, etc.). When multiple anchors match, the one with the **fewest skips** wins so the algorithm doesn't latch onto the previous path's `etc` instead of the next path's. After the anchor is chosen, it steps back one slot if the preceding token is a pre-clean injection (`slash`/`at`/`hash`) so the marker turns on at the start of the spoken expansion rather than after it. Window size scales with the current text token's char length (`min(50, max(10, charLength))`) so long paths still have room to find their successor.
 
-#### 3.1.2 Security
+Before sending text to Kokoro, the engine cleans tokens that start with non-word characters (e.g. `-a`, `/all`, `>`). Kokoro's timestamp generator truncates at these tokens - it continues generating audio but stops emitting word boundaries. Known prefixes are expanded to spoken forms (`/` → "slash", `@` → "at", `#` → "hash") via `_PREFIX_MAP`; unknown prefixes are stripped (e.g. `-a` → `"a"`). The original (uncleaned) sentence text is retained for `_computeWordPositions` so that highlight charIndex mapping still resolves to the correct DOM spans.
+
+#### 3.1.2 Voice Availability and Auto-Pick
+
+Some voice families do not fire `boundary` events, so word-level highlighting freezes on the first word. They remain selectable in the dropdown - sentence focus, color, and dim modes still work for full-text reading - but auto-pick avoids them via `isLimitedVoice(voice)` (matches against the `_LIMITED_VOICE_PATTERNS` array in `lib/config.js`; production list is `[/^Google\s/i]`), the popup and options page surface an orange warning alert above the dropdown when one is active, and the Highlighter's `suppressWordMarker` setting causes `_applyHighlight` to skip the per-word range while still tracking the active word index for sentence/line context. Add patterns to the array to extend the exception list - the rest of the pipeline keys off the predicate.
+
+On first load (when a saved `voiceURI` is missing or refers to a no-longer-installed voice), the engine calls `pickDefaultVoice(voices)` and persists the result via `safeSave({ voiceURI })`. A user-selected limited voice is respected and not auto-replaced. The pick walks `navigator.languages` in order, then appends an English fallback (`en-us`, `en-gb`, `en`) so users with no voices in their configured languages still land on a working voice. Within each language, the algorithm tries six tiers in order:
+
+1. Exact regional match + premium (name matches `(Natural)` / `(Premium)` / `(Enhanced)`)
+2. Exact regional match + system default (`voice.default === true`)
+3. Exact regional match, any voice
+4. Same primary subtag (e.g. `en-*`) + premium
+5. Same primary subtag + system default
+6. Same primary subtag, any voice
+
+The system-default tier prevents macOS users from landing on a novelty voice (Albert, Bad News, Pipe Organ, etc.) when no premium voice is installed - the OS marks the user-selected default voice (typically Samantha on macOS, Zira Desktop on Windows) with `voice.default = true`, which is treated as a quality signal between premium and "any."
+
+Auto-pick is gated by two flags on the engine: `_settingsLoaded` (set by `updateSettings` so the engine doesn't replace a saved voice before settings are applied) and `_autoPickRan` (one-shot per session, set after `_maybeAutoPickVoice` runs once). The same logic also runs in the options page on first load via `loadVoices`, so users who open Settings before any tab loads still get an auto-picked voice persisted.
+
+The dropdown filter `filterVoicesForDropdown(voices, savedURI, showAll)`, when `showAllLanguages` is false, restricts optgroups to primary subtags in `getUserLangPrefixes()`. The saved voice's language is always added to the allowed set so users who manually pick a foreign-language voice never lose their selection on toggle. Limited voices are kept in the dropdown so users who only have those (e.g. Linux without `espeak` installed) still get a usable selection.
+
+The Highlighter's `suppressWordMarker` flag is recomputed by `content.js` on initial settings load and on every `updateSettings` broadcast that touches `voiceURI` or `ttsBackend`. It is true when the active backend is `'browser'` and the resolved voice matches `isLimitedVoice`. Inside `_applyHighlight`, this skips `_wordHL.add(wordRange)` while still computing the focus context (sentence / text / line) so the rest of the focus-mode rendering keeps working.
+
+#### 3.1.3 Security
 
 Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
 
@@ -90,7 +113,7 @@ The Highlighter is the single source of truth for the word list. It uses the **C
 
 It performs three operations in sequence:
 
-1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and records each word as a `{textNode, start, end, block, text}` entry in an internal list. No DOM writes occur. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. Open shadow roots are descended into recursively by `_walkForTextNodes`, so web-component content (custom elements, design-system components, etc.) is read alongside light DOM; closed shadow roots are inaccessible and silently skipped. If a selection `Range` is provided, the Highlighter collects the set of text nodes that intersect the range, and only words from those nodes are recorded. Boundary text nodes are trimmed using the range's start/end offsets so only words within the precise selection are included.
+1. **Prepare.** Walks the container's DOM using a `TreeWalker`, visits every text node, and records each word as a `{textNode, start, end, block, text}` entry in an internal list. No DOM writes occur. Text nodes inside elements matching the skip selectors (navigation, ads, code blocks, screen-reader-only text, `aria-hidden` elements, etc.) are excluded. Text inside elements that are not visible (`display: none`, `visibility: hidden`) is also excluded via `Element.checkVisibility()`. Open shadow roots are descended into recursively by `_walkForTextNodes`, so web-component content (custom elements, design-system components, etc.) is read alongside light DOM; closed shadow roots are inaccessible and silently skipped. If a selection `Range` is provided, the Highlighter collects the set of text nodes that intersect the range, and only words from those nodes are recorded. Boundary text nodes are trimmed using the range's start/end offsets so only words within the precise selection are included. Pure-punctuation parts (e.g. a stray `.` from `<code>X</code>.` in its own text node) are appended to the previous word's `text` rather than pushed as standalone entries, so sentence boundary detection sees the period attached and Kokoro pre-clean does not drop it.
 
 2. **Build sentences.** The `getSentences()` method constructs sentence strings directly from the recorded words. A new sentence boundary is created when a block-level element boundary is detected (e.g., between two `<p>` tags) or when a word ends with sentence-ending punctuation. Pre-computed character offsets are stored in each sentence map entry so that `highlightWord()` can resolve character positions without repeated string splitting. The word count per sentence is always identical to the word-entry count it covers.
 
@@ -228,9 +251,14 @@ autoScroll        Boolean. Whether to track the active word with a rAF ease
                   from the top. Pauses for 1.5s after any user-initiated scroll.
 ttsBackend        String. One of: browser, kokoro. Default: browser.
 kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
-kokoroVoice       String. Kokoro voice identifier. Default: af_alloy.
+kokoroVoice       String. Kokoro voice identifier. Default: am_adam.
 siteSelectors     Object. Map of hostname to CSS selector for per-site content
                   detection overrides. Default: {} (empty).
+showAllLanguages  Boolean. Default: false. When false, the browser voice
+                  dropdown filters to optgroups whose primary subtag is in
+                  navigator.languages (the saved voice's language is always
+                  kept visible). When true, all voices are shown regardless
+                  of language.
 ```
 
 Settings defaults are defined once in `lib/config.js` as `SETTINGS_DEFAULTS` and shared across content scripts, popup, and options page.
@@ -283,7 +311,9 @@ listen-carefully/
     content.css                ::highlight() rules for lc-word-active / lc-sentence-active.
     lib/
         config.js              Shared constants and utilities: settings defaults, skip selectors,
-                               Kokoro voice formatting, isLocalhostURL, safeSave.
+                               Kokoro voice formatting, isLocalhostURL, safeSave, voice
+                               availability + auto-pick (isLimitedVoice, pickDefaultVoice,
+                               filterVoicesForDropdown, getUserLangTags / getUserLangPrefixes).
         tts-engine.js          Dual-backend TTS engine (Web Speech API + Kokoro).
         highlighter.js         CSS Custom Highlight API painter, index-based word mapping, focus mode.
         text-extractor.js      Content detection: findMainContent, findContainerFor.
@@ -305,7 +335,7 @@ listen-carefully/
 
 ### 10.1 Voice Loading
 
-`speechSynthesis.getVoices()` may return an empty array on the first call. The TTS engine listens for the `voiceschanged` event and reloads the voice list when it fires. The `getVoices` message handler in `content.js` includes a 300ms retry for cases where the popup requests voices before the browser has populated them.
+`speechSynthesis.getVoices()` may return an empty array on the first call. The TTS engine listens for the `voiceschanged` event and reloads the voice list when it fires. The `getVoices` message handler in `content.js` includes a 300ms retry for cases where the popup requests voices before the browser has populated them. Voice auto-pick (Section 3.1.2) is gated on both voices being loaded and settings being applied, so it runs reliably on whichever event arrives second.
 
 ### 10.2 Chromium Utterance Limit
 

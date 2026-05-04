@@ -15,6 +15,9 @@
     btnNext: document.getElementById('btn-next'),
     voice: document.getElementById('voice'),
     voiceGroup: document.getElementById('voice-group'),
+    showAllLanguages: document.getElementById('show-all-languages'),
+    noVoicesNote: document.getElementById('voice-no-voices-note'),
+    limitedNote: document.getElementById('voice-limited-note'),
     kokoroInfo: document.getElementById('kokoro-info'),
     kokoroVoiceLabel: document.getElementById('kokoro-voice-label'),
     rate: document.getElementById('rate'),
@@ -49,6 +52,7 @@
   }
 
   let currentState = 'stopped';
+  let _voicesCache = [];
 
   function updatePlayPauseButtons(state) {
     currentState = state;
@@ -121,6 +125,7 @@
         els.volume.value = settings.volume;
         els.volumeValue.textContent = Math.round(settings.volume * 100) + '%';
         els.autoScroll.checked = settings.autoScroll;
+        els.showAllLanguages.setAttribute('aria-pressed', String(!!settings.showAllLanguages));
         updateBackendUI(settings.ttsBackend, settings.kokoroVoice);
         resolve(settings);
       });
@@ -145,17 +150,31 @@
       return;
     }
 
-    // Group by language
+    const settings = await new Promise(r =>
+      chrome.storage.local.get({ voiceURI: null, showAllLanguages: false }, r)
+    );
+
+    // Truly empty (no TTS at all) is rare - kept as a defensive alert.
+    els.noVoicesNote.hidden = result.voices.length > 0;
+
+    // Limited voices stay selectable but suppress word-by-word marking.
+    // Show the warning when the active selection is one of them.
+    _voicesCache = result.voices;
+    const selected = result.voices.find(v => v.voiceURI === settings.voiceURI);
+    els.limitedNote.hidden = !(selected && isLimitedVoice(selected));
+
+    const visible = filterVoicesForDropdown(
+      result.voices, settings.voiceURI, settings.showAllLanguages
+    );
+
     const groups = {};
-    for (const v of result.voices) {
+    for (const v of visible) {
       if (!groups[v.lang]) groups[v.lang] = [];
       groups[v.lang].push(v);
     }
 
     els.voice.replaceChildren();
-    const sortedLangs = Object.keys(groups).sort();
-
-    for (const lang of sortedLangs) {
+    for (const lang of Object.keys(groups).sort()) {
       const optgroup = document.createElement('optgroup');
       optgroup.label = lang;
       for (const v of groups[lang]) {
@@ -167,11 +186,7 @@
       els.voice.appendChild(optgroup);
     }
 
-    // Restore saved voice
-    const settings = await new Promise(r => chrome.storage.local.get({ voiceURI: null }, r));
-    if (settings.voiceURI) {
-      els.voice.value = settings.voiceURI;
-    }
+    if (settings.voiceURI) els.voice.value = settings.voiceURI;
   }
 
   // --- Sync current state from content script ---
@@ -224,6 +239,15 @@
 
   els.voice.addEventListener('change', () => {
     saveSettings({ voiceURI: els.voice.value });
+    const v = _voicesCache.find(x => x.voiceURI === els.voice.value);
+    els.limitedNote.hidden = !(v && isLimitedVoice(v));
+  });
+
+  els.showAllLanguages.addEventListener('click', () => {
+    const next = els.showAllLanguages.getAttribute('aria-pressed') !== 'true';
+    els.showAllLanguages.setAttribute('aria-pressed', String(next));
+    saveSettings({ showAllLanguages: next });
+    loadVoices();
   });
 
   let rateDebounce;

@@ -25,6 +25,9 @@
     kokoroTestResult: document.getElementById('kokoro-test-result'),
     voiceSection: document.getElementById('voice-section'),
     voice: document.getElementById('voice'),
+    showAllLanguages: document.getElementById('show-all-languages'),
+    noVoicesNote: document.getElementById('voice-no-voices-note'),
+    limitedNote: document.getElementById('voice-limited-note'),
     btnPreview: document.getElementById('btn-preview'),
     rate: document.getElementById('rate'),
     rateValue: document.getElementById('rate-value'),
@@ -98,7 +101,7 @@
   async function loadKokoroOptions() {
     const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');
     const { kokoroVoice: savedVoice } = await new Promise(r =>
-      chrome.storage.local.get({ kokoroVoice: 'af_alloy' }, r)
+      chrome.storage.local.get({ kokoroVoice: SETTINGS_DEFAULTS.kokoroVoice }, r)
     );
 
     // Replace dropdown with a disabled option that displays the saved voice,
@@ -187,32 +190,59 @@
   // --- Load voices (options page has direct access to speechSynthesis) ---
 
   function loadVoices() {
-    const voices = speechSynthesis.getVoices();
-    if (voices.length === 0) return;
+    const allVoices = speechSynthesis.getVoices();
+    if (allVoices.length === 0) return;
 
-    const groups = {};
-    for (const v of voices) {
-      if (!groups[v.lang]) groups[v.lang] = [];
-      groups[v.lang].push(v);
-    }
+    chrome.storage.local.get(
+      { voiceURI: null, showAllLanguages: false },
+      (s) => {
+        // Auto-pick only when no saved voice or it refers to a no-longer-
+        // installed voice. A user-selected limited voice (Google / Microsoft
+        // Online / etc.) is respected - it just shows the warning + suppresses
+        // the per-word marker. This matches the engine's _maybeAutoPickVoice.
+        let voiceURI = s.voiceURI;
+        const saved = voiceURI && allVoices.find(v => v.voiceURI === voiceURI);
+        if (!saved) {
+          const picked = pickDefaultVoice(allVoices);
+          if (picked && picked !== voiceURI) {
+            voiceURI = picked;
+            safeSave({ voiceURI: picked });
+          }
+        }
 
-    els.voice.replaceChildren();
-    for (const lang of Object.keys(groups).sort()) {
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = lang;
-      for (const v of groups[lang]) {
-        const option = document.createElement('option');
-        option.value = v.voiceURI;
-        option.textContent = v.name;
-        optgroup.appendChild(option);
+        // Truly empty system (no TTS at all) - rare, but keep the alert
+        // for the case where Chromium reports zero voices.
+        els.noVoicesNote.hidden = allVoices.length > 0;
+
+        // Limited voices stay selectable but suppress word-by-word marking.
+        // Show an inline warning when the active selection is one of them.
+        const selected = allVoices.find(v => v.voiceURI === voiceURI);
+        els.limitedNote.hidden = !(selected && isLimitedVoice(selected));
+
+        const visible = filterVoicesForDropdown(allVoices, voiceURI, s.showAllLanguages);
+
+        const groups = {};
+        for (const v of visible) {
+          if (!groups[v.lang]) groups[v.lang] = [];
+          groups[v.lang].push(v);
+        }
+
+        els.voice.replaceChildren();
+        for (const lang of Object.keys(groups).sort()) {
+          const optgroup = document.createElement('optgroup');
+          optgroup.label = lang;
+          for (const v of groups[lang]) {
+            const option = document.createElement('option');
+            option.value = v.voiceURI;
+            option.textContent = v.name;
+            optgroup.appendChild(option);
+          }
+          els.voice.appendChild(optgroup);
+        }
+
+        if (voiceURI) els.voice.value = voiceURI;
       }
-      els.voice.appendChild(optgroup);
-    }
-
-    // Restore saved
-    chrome.storage.local.get({ voiceURI: null }, (s) => {
-      if (s.voiceURI) els.voice.value = s.voiceURI;
-    });
+    );
   }
 
   speechSynthesis.addEventListener('voiceschanged', loadVoices);
@@ -246,6 +276,7 @@
     els.wordMarkerStyle.value = validMarkers.includes(s.wordMarkerStyle) ? s.wordMarkerStyle : 'color-underline';
     els.matchingUnderline.checked = s.matchingUnderline !== false;
     els.autoScroll.checked = s.autoScroll;
+    els.showAllLanguages.checked = !!s.showAllLanguages;
     _siteSelectors = s.siteSelectors || {};
     renderSiteSelectors();
     updatePreview();
@@ -379,7 +410,7 @@
 
   els.btnTestKokoro.addEventListener('click', async () => {
     const endpoint = els.kokoroEndpoint.value.replace(/\/+$/, '');
-    const voice = els.kokoroVoice.value || 'af_alloy';
+    const voice = els.kokoroVoice.value || SETTINGS_DEFAULTS.kokoroVoice;
 
     if (!isLocalhostURL(endpoint)) {
       els.kokoroTestResult.hidden = false;
@@ -438,7 +469,17 @@
     }
   });
 
-  els.voice.addEventListener('change', () => save({ voiceURI: els.voice.value }));
+  els.voice.addEventListener('change', () => {
+    save({ voiceURI: els.voice.value });
+    // Refresh the limited-voice warning visibility based on the new selection.
+    const v = speechSynthesis.getVoices().find(x => x.voiceURI === els.voice.value);
+    els.limitedNote.hidden = !(v && isLimitedVoice(v));
+  });
+
+  els.showAllLanguages.addEventListener('change', () => {
+    save({ showAllLanguages: els.showAllLanguages.checked });
+    loadVoices();
+  });
 
   let rateDebounce;
   els.rate.addEventListener('input', () => {

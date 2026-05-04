@@ -26,7 +26,7 @@ class TTSEngine {
       volume: 1.0,
       ttsBackend: 'browser',
       kokoroEndpoint: 'http://localhost:8880',
-      kokoroVoice: 'af_alloy',
+      kokoroVoice: SETTINGS_DEFAULTS.kokoroVoice,
     };
 
     // Kokoro playback state
@@ -53,6 +53,12 @@ class TTSEngine {
     this.onEnd = null;          // () => void
     this.onError = null;        // (message) => void
 
+    // Gates for one-shot auto-pick: we only run after settings have been
+    // applied at least once (so we don't replace a saved voice the user
+    // explicitly picked) and only attempt the pick a single time per session.
+    this._settingsLoaded = false;
+    this._autoPickRan = false;
+
     this._loadVoices();
     speechSynthesis.addEventListener('voiceschanged', () => this._loadVoices());
   }
@@ -63,6 +69,28 @@ class TTSEngine {
 
   _loadVoices() {
     this.voices = speechSynthesis.getVoices();
+    if (this._settingsLoaded) this._maybeAutoPickVoice();
+  }
+
+  /**
+   * Run once when both voices and settings are available: if the saved voice
+   * is missing (null on first install or refers to an uninstalled voice),
+   * pick a sensible default and persist it. A user-selected limited voice
+   * is respected - it stays selectable, just shows a warning + suppresses
+   * the broken word marker.
+   */
+  _maybeAutoPickVoice() {
+    if (this._autoPickRan || this.voices.length === 0) return;
+
+    const current = this.voices.find(v => v.voiceURI === this.settings.voiceURI);
+    if (!current) {
+      const picked = pickDefaultVoice(this.voices);
+      if (picked && picked !== this.settings.voiceURI) {
+        this.settings.voiceURI = picked;
+        try { safeSave({ voiceURI: picked }); } catch {}
+      }
+    }
+    this._autoPickRan = true;
   }
 
   getVoices() {
@@ -130,6 +158,13 @@ class TTSEngine {
       } else {
         this.settings[k] = settings[k];
       }
+    }
+
+    // First settings application unlocks auto-pick - voices may have already
+    // loaded by now (constructor-time _loadVoices was a no-op in that case).
+    if (!this._settingsLoaded) {
+      this._settingsLoaded = true;
+      this._maybeAutoPickVoice();
     }
 
     // Check if anything actually changed
@@ -418,7 +453,7 @@ class TTSEngine {
         type: 'kokoroTTS',
         text: kokoroText,
         endpoint,
-        voice: this.settings.kokoroVoice || 'af_alloy',
+        voice: this.settings.kokoroVoice || SETTINGS_DEFAULTS.kokoroVoice,
         speed: this.settings.rate || 1.0,
       });
 
@@ -620,20 +655,59 @@ class TTSEngine {
       result.push(apiWords[apiIdx].start_time);
       apiIdx++;
 
-      // Lookahead: find where the NEXT text token appears in the API words.
-      // This skips over expanded words (e.g. "#3"→"number","three")
-      // so the next position re-syncs to the correct API entry.
+      // Find where text[i+1] starts in the API stream. Multi-token text
+      // ("/etc/cron.daily" → ["slash","etc","slash","cron-daily"]) needs
+      // (a) skip-tolerance for interjected tokens (internal slashes etc.),
+      // (b) fewest-skips wins so we don't latch onto the previous path's
+      // "etc", and (c) step-back over a pre-clean injection (slash/at/hash)
+      // so the marker turns on when its audio actually begins.
       if (i + 1 < this._wordPositions.length && apiIdx < apiWords.length) {
         const nextPos = this._wordPositions[i + 1];
         const nextClean = text.substr(nextPos.charIndex, nextPos.charLength)
           .replace(/[^\w]/g, '').toLowerCase();
 
-        const maxLook = Math.min(apiIdx + 10, apiWords.length);
-        for (let j = apiIdx; j < maxLook; j++) {
-          if (apiClean[j] === nextClean) {
-            apiIdx = j;
-            break;
+        const lookaheadWindow = Math.min(
+          50,
+          Math.max(10, this._wordPositions[i].charLength)
+        );
+        const maxLook = Math.min(apiIdx + lookaheadWindow, apiWords.length);
+        const MAX_SKIPS = 5;
+        let bestIdx = -1;
+        let bestSkips = Infinity;
+
+        for (let j = apiIdx; j < maxLook && bestSkips > 0; j++) {
+          if (!apiClean[j] || !nextClean.startsWith(apiClean[j])) continue;
+
+          let accum = apiClean[j];
+          let skips = 0;
+          let matched = (accum === nextClean);
+
+          for (let k = j + 1; k < maxLook && !matched && accum.length < nextClean.length; k++) {
+            const candidate = accum + apiClean[k];
+            if (nextClean.startsWith(candidate)) {
+              accum = candidate;
+              if (accum === nextClean) matched = true;
+            } else if (skips < MAX_SKIPS) {
+              skips++;
+            } else {
+              break;
+            }
           }
+
+          if (matched && skips < bestSkips) {
+            bestIdx = j;
+            bestSkips = skips;
+          }
+        }
+
+        if (bestIdx !== -1) {
+          if (bestIdx > apiIdx) {
+            const preceding = apiClean[bestIdx - 1];
+            if (preceding === 'slash' || preceding === 'at' || preceding === 'hash') {
+              bestIdx--;
+            }
+          }
+          apiIdx = bestIdx;
         }
       }
     }

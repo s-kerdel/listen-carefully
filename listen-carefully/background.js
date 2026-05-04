@@ -56,7 +56,7 @@ async function handleKokoroTTS(msg) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'kokoro',
-        voice: msg.voice || 'af_alloy',
+        voice: msg.voice || SETTINGS_DEFAULTS.kokoroVoice,
         input: msg.text,
         speed: msg.speed || 1.0,
         response_format: 'mp3',
