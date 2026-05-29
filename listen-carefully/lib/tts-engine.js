@@ -381,7 +381,12 @@ class TTSEngine {
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = this._findVoice(this.settings.voiceURI);
     if (voice) utterance.voice = voice;
-    utterance.rate = this.settings.rate;
+    // Limited voices (Google) return no audio above 2x - cap so high rates
+    // still play instead of silently failing. voice is null when the browser
+    // uses its system default, so resolve that for the check.
+    const effectiveVoice = voice || this.voices.find(v => v.default) || null;
+    const maxRate = effectiveVoice && isLimitedVoice(effectiveVoice) ? 2.0 : Infinity;
+    utterance.rate = Math.min(this.settings.rate, maxRate);
     utterance.pitch = this.settings.pitch;
     utterance.volume = this.settings.volume;
 

@@ -82,7 +82,7 @@ Before sending text to Kokoro, the engine cleans tokens that start with non-word
 
 #### 3.1.2 Voice Availability and Auto-Pick
 
-Some voice families do not fire `boundary` events, so word-level highlighting freezes on the first word. They remain selectable in the dropdown - sentence focus, color, and dim modes still work for full-text reading - but auto-pick avoids them via `isLimitedVoice(voice)` (matches against the `_LIMITED_VOICE_PATTERNS` array in `lib/config.js`; production list is `[/^Google\s/i]`), the popup and options page surface an orange warning alert above the dropdown when one is active, and the Highlighter's `suppressWordMarker` setting causes `_applyHighlight` to skip the per-word range while still tracking the active word index for sentence/line context. Add patterns to the array to extend the exception list - the rest of the pipeline keys off the predicate.
+Some voice families do not fire `boundary` events, so word-level highlighting freezes on the first word. They remain selectable in the dropdown - sentence focus, color, and dim modes still work for full-text reading - but auto-pick avoids them via `isLimitedVoice(voice)` (matches against the `_LIMITED_VOICE_PATTERNS` array in `lib/config.js`; production list is `[/^Google\s/i]`), the popup and options page surface an orange warning alert above the dropdown when one is active, and the Highlighter's `suppressWordMarker` setting causes `_applyHighlight` to skip the per-word range. Because no boundary events fire, the active word never advances within an utterance, so active-line focus would freeze on the first line; `_applyHighlight` therefore falls back to active-text (block) context when `suppressWordMarker` is set (both use block-level chunking, so no re-chunking is needed). The options page additionally disables the Active Line dropdown option and demotes a saved `line` selection to `text` for these voices. Their playback rate is capped at 2x in `_speakNextBrowser`, since Google voices return no audio above 2x. Add patterns to the array to extend the exception list - the rest of the pipeline keys off the predicate.
 
 On first load (when a saved `voiceURI` is missing or refers to a no-longer-installed voice), the engine calls `pickDefaultVoice(voices)` and persists the result via `safeSave({ voiceURI })`. A user-selected limited voice is respected and not auto-replaced. The pick walks `navigator.languages` in order, then appends an English fallback (`en-us`, `en-gb`, `en`) so users with no voices in their configured languages still land on a working voice. Within each language, the algorithm tries six tiers in order:
 
@@ -99,7 +99,7 @@ Auto-pick is gated by two flags on the engine: `_settingsLoaded` (set by `update
 
 The dropdown filter `filterVoicesForDropdown(voices, savedURI, showAll)`, when `showAllLanguages` is false, restricts optgroups to primary subtags in `getUserLangPrefixes()`. The saved voice's language is always added to the allowed set so users who manually pick a foreign-language voice never lose their selection on toggle. Limited voices are kept in the dropdown so users who only have those (e.g. Linux without `espeak` installed) still get a usable selection.
 
-The Highlighter's `suppressWordMarker` flag is recomputed by `content.js` on initial settings load and on every `updateSettings` broadcast that touches `voiceURI` or `ttsBackend`. It is true when the active backend is `'browser'` and the resolved voice matches `isLimitedVoice`. Inside `_applyHighlight`, this skips `_wordHL.add(wordRange)` while still computing the focus context (sentence / text / line) so the rest of the focus-mode rendering keeps working.
+The Highlighter's `suppressWordMarker` flag is recomputed by `content.js` on initial settings load and on every `updateSettings` broadcast that touches `voiceURI` or `ttsBackend`. It is true when the active backend is `'browser'` and the resolved voice matches `isLimitedVoice`. Inside `_applyHighlight`, this skips `_wordHL.add(wordRange)` and maps `line` focus to `text` (block) context, while `sentence` / `text` are computed as usual, so the rest of the focus-mode rendering keeps working. Because the flag is read on every `_applyHighlight`, a mid-playback voice switch (e.g. from the popup, which has no focus-mode control) takes effect immediately without rebuilding the queue.
 
 #### 3.1.3 Security
 
@@ -221,7 +221,8 @@ Settings and internal state are stored in `chrome.storage.local`. No sync storag
 
 ```
 voiceURI          String or null. The selected browser voice identifier.
-rate              Float, 0.5 to 3.0. Playback speed multiplier.
+rate              Float, 0.5 to 3.0. Playback speed multiplier. Capped at 2.0
+                  for limited voices (Google), which return no audio above 2x.
 pitch             Float, 0.5 to 2.0. Voice pitch (browser backend only).
 volume            Float, 0.0 to 1.0. Playback volume.
 highlightBg       String. CSS hex color for word highlight background.
