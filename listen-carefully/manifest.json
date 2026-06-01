@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Listen Carefully",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Stop reading. Start listening. Word-tracked TTS that breaks through text walls and cognitive overload.",
   "author": "Shiva Kerdel",
   "homepage_url": "https://github.com/s-kerdel/listen-carefully",

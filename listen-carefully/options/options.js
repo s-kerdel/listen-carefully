@@ -58,6 +58,20 @@
   // SETTINGS_DEFAULTS, KOKORO_LANGS, KOKORO_GENDERS, formatKokoroVoice
   // loaded from lib/config.js
 
+  let _activeVoiceLimited = false;
+
+  // Line focus needs word boundaries, which limited voices don't fire.
+  // Disable the option for them and demote a saved 'line' to 'text'.
+  function refreshLineFocusAvailability() {
+    const lineOpt = els.focusMode.querySelector('option[value="line"]');
+    if (lineOpt) lineOpt.disabled = _activeVoiceLimited;
+    if (_activeVoiceLimited && els.focusMode.value === 'line') {
+      els.focusMode.value = 'text';
+      save({ focusMode: 'text' });
+      updatePreview();
+    }
+  }
+
   function validHex(str) {
     return /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$/.test(str) ? str : null;
   }
@@ -217,7 +231,9 @@
         // Limited voices stay selectable but suppress word-by-word marking.
         // Show an inline warning when the active selection is one of them.
         const selected = allVoices.find(v => v.voiceURI === voiceURI);
-        els.limitedNote.hidden = !(selected && isLimitedVoice(selected));
+        _activeVoiceLimited = Boolean(selected && isLimitedVoice(selected));
+        els.limitedNote.hidden = !_activeVoiceLimited;
+        refreshLineFocusAvailability();
 
         const visible = filterVoicesForDropdown(allVoices, voiceURI, s.showAllLanguages);
 
@@ -271,6 +287,7 @@
     // Backward compat: convert old boolean focusMode to string
     const fm = s.focusMode === true ? 'sentence' : (s.focusMode || 'off');
     els.focusMode.value = fm;
+    refreshLineFocusAvailability();
     els.focusDimStyle.value = (s.focusDimStyle === 'band') ? 'band' : 'dim';
     const validMarkers = ['color-underline', 'color-underline-continuous', 'color', 'bg-only'];
     els.wordMarkerStyle.value = validMarkers.includes(s.wordMarkerStyle) ? s.wordMarkerStyle : 'color-underline';
@@ -471,9 +488,11 @@
 
   els.voice.addEventListener('change', () => {
     save({ voiceURI: els.voice.value });
-    // Refresh the limited-voice warning visibility based on the new selection.
+    // Refresh the limited-voice warning + line-focus availability for the new selection.
     const v = speechSynthesis.getVoices().find(x => x.voiceURI === els.voice.value);
-    els.limitedNote.hidden = !(v && isLimitedVoice(v));
+    _activeVoiceLimited = Boolean(v && isLimitedVoice(v));
+    els.limitedNote.hidden = !_activeVoiceLimited;
+    refreshLineFocusAvailability();
   });
 
   els.showAllLanguages.addEventListener('change', () => {

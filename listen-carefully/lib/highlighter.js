@@ -461,7 +461,13 @@ class Highlighter {
     // the active word belongs to, as a [ctxStart, ctxEnd) half-open range.
     let ctxStart = wordIndex;
     let ctxEnd = wordIndex + 1;
-    if (this.focusMode === 'sentence' || this.focusMode === 'text') {
+
+    // Limited voices have no word boundaries; line focus would freeze, so
+    // fall back to text (block) focus: same chunking, tracks the spoken block.
+    const effectiveFocus = (this.focusMode === 'line' && this.settings.suppressWordMarker)
+      ? 'text' : this.focusMode;
+
+    if (effectiveFocus === 'sentence' || effectiveFocus === 'text') {
       for (const info of this.sentenceMap) {
         if (wordIndex >= info.startWordIndex && wordIndex < info.startWordIndex + info.wordCount) {
           ctxStart = info.startWordIndex;
@@ -469,7 +475,7 @@ class Highlighter {
           break;
         }
       }
-    } else if (this.focusMode === 'line') {
+    } else if (effectiveFocus === 'line') {
       const [start, end] = this._getVisualLineRange(wordIndex);
       ctxStart = start;
       ctxEnd = end + 1;
