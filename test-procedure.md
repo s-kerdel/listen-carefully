@@ -7,7 +7,7 @@
 3. Click "Load unpacked" and select the `listen-carefully/` folder (or reload if already loaded)
 4. Open a content-rich page (e.g. a Wikipedia article or blog post)
 
-**Note for Kokoro tests:** The first time you switch the TTS backend to **Kokoro** in any test, the browser prompts to grant localhost access. Click **Allow**. Subsequent switches in the same session do not re-prompt. If you click **Block**, the backend reverts to Browser and the test cannot proceed.
+**Note for Kokoro tests:** These require a local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server - other Kokoro packagings expose different endpoints and will not work. The first time you switch the TTS backend to **Kokoro** in any test, the browser prompts to grant localhost access. Click **Allow**. Subsequent switches in the same session do not re-prompt. If you click **Block**, the backend reverts to Browser and the test cannot proceed.
 
 ---
 
@@ -201,3 +201,18 @@
 
 **Pass:** After step 6, "Michael - Male (American English)" is automatically reselected — the saved voice was preserved across the error state.
 **Fail:** The dropdown reverts to "Alloy" (default) or any voice other than the one chosen in step 2.
+
+### 11d. Voice list works on old and new Kokoro-FastAPI
+
+(Kokoro-FastAPI v0.4.0 changed `/v1/audio/voices` from a list of strings to a list
+of `{id, name}` objects. The extension must handle both.)
+
+1. Open the Options page with Kokoro selected and a working server
+2. Click the **Refresh voices** button
+3. In a terminal, check which shape your server returns:
+   - `curl http://localhost:8880/v1/audio/voices` returns `{"voices":[{"id":"af_alloy",...}]}`
+   - `curl "http://localhost:8880/v1/audio/voices?legacy=true"` returns the old string shape
+
+**Pass:** The dropdown populates with grouped voices regardless of which shape the
+server returns. Voice IDs render as friendly names ("Alloy - Female (American English)").
+**Fail:** "Kokoro server at ... returned no voices" while the curl above clearly lists voices.

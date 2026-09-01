@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Listen Carefully is a Chromium-based browser extension that converts webpage text to speech. It supports two TTS backends: the built-in Web Speech API (default) and an optional local Kokoro TTS server. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser with no external network dependencies. The Kokoro backend communicates only with localhost.
+Listen Carefully is a Chromium-based browser extension that converts webpage text to speech. It supports two TTS backends: the built-in Web Speech API (default) and an optional local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server. The Kokoro backend targets that implementation specifically - it depends on `GET /v1/audio/voices` and `POST /dev/captioned_speech`, which other Kokoro packagings do not provide. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser with no external network dependencies. The Kokoro backend communicates only with localhost.
 
 The extension is built on Manifest V3 and targets Chrome and Brave on Windows 11, where Microsoft neural voices provide high quality speech synthesis through the operating system.
 
@@ -43,6 +43,8 @@ The popup polls the content script every 500ms to keep its state synchronized, s
 Files: `options/options.html`, `options/options.js`, `options/options.css`
 
 The options page provides the full settings panel including pitch control, highlight color pickers with presets, content filtering toggles, and a voice preview feature. Unlike the popup, the options page opens in a full tab and has direct access to `speechSynthesis` for voice enumeration and preview playback.
+
+The options page is the only component that calls the Kokoro voice listing endpoint (`GET /v1/audio/voices`); playback itself goes through the service worker. Kokoro-FastAPI changed that response shape in v0.4.0 (released 25 May 2026) from `{"voices": ["af_bella", ...]}` to `{"voices": [{"id": "af_bella", "name": "af_bella"}, ...]}` (for OpenAI-client compatibility). `loadKokoroOptions` normalises both forms to a plain array of voice IDs, so the dropdown populates against old and new servers alike. Everything downstream (`isKnownVoiceFormat`, `formatKokoroVoice`, language grouping) keys off the ID string only.
 
 ## 3. Core Modules
 

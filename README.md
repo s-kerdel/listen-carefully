@@ -11,10 +11,10 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 3. **Focus mode.** Dims the surrounding text to show only the active text block, sentence, or line. Choose between **Fade surroundings** (non-active text fades, active text keeps its original page color) and **Color band** (active text paints in your highlight color) for different levels of emphasis.
 4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse. Shortcuts use `stopPropagation` to prevent conflicts with site access keys.
 5. **Voice selection with smart defaults.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language. On first run the extension auto-picks the best available voice for your browser language, preferring premium / natural voices, then your system default voice (Samantha on macOS, Zira on Windows, etc.), then any local voice. The dropdown filters to your browser's preferred languages by default with a one-click "Show all languages" toggle to reveal the full list. Google voices remain selectable (active text/sentence focus and color modes still work), but they don't expose word boundaries, so the active-word marker is suppressed, active-line focus falls back to active-text, and a warning is shown above the dropdown when one is active. Their playback rate is also capped at 2x, above which they return no audio.
-6. **Kokoro TTS support.** Optionally connect to a local [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server for higher quality voices with word-level timestamps. Supports 67 voices across 9 languages. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
+6. **Kokoro TTS support.** Optionally connect to a local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server for higher quality voices with word-level timestamps. Supports the full voice list reported by your server (68 voices across 9 languages on Kokoro-FastAPI 0.8.x); the dropdown is built from the server's own response, so newer voices appear automatically. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
 7. **Smart content detection.** Automatically finds article titles even when they sit outside the content container. Expands to include heading siblings and falls back to broader containers when skip selectors filter out all text.
 8. **Precise selection mode.** Selected text mode trims words at the exact selection boundary, and preserves the selection range if the popup steals focus.
-9. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro backend communicates only with a localhost service.
+9. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro-FastAPI backend communicates only with a localhost service.
 10. **Local file support.** Can read local HTML and text files when "Allow access to file URLs" is enabled in the browser's extension settings.
 
 ## Installation
@@ -51,13 +51,15 @@ The "Siri" and "Enhanced" voices provide higher quality than the default system 
 
 **Note:** some macOS voices may connect to Apple's cloud services for speech synthesis. This is handled by the operating system, not by this extension. See the privacy policy for details.
 
-### Kokoro TTS (optional)
+### Kokoro-FastAPI (optional)
 
 For higher quality local TTS, you can connect to a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server running on your machine.
 
+**This must be Kokoro-FastAPI specifically**, not another Kokoro packaging. Several unrelated Docker images and wrappers also call themselves "Kokoro" but expose different endpoints and do not return word-level timestamps, which the highlighting depends on. The extension requires `GET /v1/audio/voices` for the voice list and `POST /dev/captioned_speech` for timestamped audio - both are Kokoro-FastAPI specific.
+
 1. Install and start Kokoro-FastAPI (see its README for setup instructions).
 2. Verify the server is running: `curl http://localhost:8880/v1/models`
-3. In the extension, open **Settings** and change the **TTS Engine** to **Kokoro (Local API)**.
+3. In the extension, open **Settings** and change the **TTS Engine** to **Kokoro-FastAPI (Local API)**.
 4. Select a voice from the dropdown and click **Test Connection**.
 
 The extension communicates only with localhost. No page content is sent to external servers. English voices support precise word-level highlighting via API timestamps. Other languages use estimated timing, which may cause the highlight to drift slightly.
@@ -120,7 +122,7 @@ Listen Carefully does not collect, store, or transmit any user data to external 
 **What the extension accesses:**
 - **Page content:** the extension reads the text content of the active page to convert it to speech. This text is processed entirely within your browser and is never sent to any external server.
 - **Local storage:** user preferences (voice, speed, colors, etc.) are stored locally on your device.
-- **Optional localhost access:** when the Kokoro TTS backend is enabled, the extension communicates with a local server on your machine (`localhost`). This requires an explicit permission grant and no data leaves your device.
+- **Optional localhost access:** when the Kokoro-FastAPI backend is enabled, the extension communicates with a local server on your machine (`localhost`). This requires an explicit permission grant and no data leaves your device.
 
 **What the extension does NOT do:**
 - Collect or transmit personal data.
