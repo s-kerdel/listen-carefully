@@ -28,12 +28,24 @@ if [ -f "$OUTPUT" ]; then
     rm "$OUTPUT"
 fi
 
+# Only $EXT_DIR is packaged, so repo-root files (tests/, docs, pack.sh itself)
+# are already out of scope. The extra excludes below are belt and braces in case
+# anything ever lands inside the extension folder.
 cd "$EXT_DIR"
 zip -r "$OUTPUT" . \
     -x ".git/*" \
     -x ".DS_Store" \
     -x "*.map" \
-    -x "Thumbs.db"
+    -x "Thumbs.db" \
+    -x "tests/*" \
+    -x "*__pycache__/*" \
+    -x "*.pyc"
+
+# Fail loudly rather than shipping a store build with test files in it.
+if unzip -l "$OUTPUT" | grep -qE 'tests/|__pycache__|\.pyc'; then
+    echo "Error: test files leaked into $OUTPUT" >&2
+    exit 1
+fi
 
 echo ""
 echo "Packaged: listen-carefully-v${VERSION}.zip"

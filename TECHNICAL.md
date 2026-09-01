@@ -332,9 +332,21 @@ listen-carefully/
         icon-16-neutral.png    Toolbar icon at 16px, 48px, and 128px sizes.
         icon-48-neutral.png    Uses a neutral design that works on both light
         icon-128-neutral.png   and dark browser themes.
+
+tests/
+    kokoro-integration-test.sh     Starts a throwaway Kokoro-FastAPI container on a
+                                   random free port, runs the checks, tears it down.
+    kokoro_integration_checks.py   The assertions. Stdlib only. Also usable directly
+                                   against a running server.
 ```
 
 ## 10. Development Notes
+
+### 10.0 Kokoro-FastAPI Integration Test
+
+The Kokoro backend depends on a server the project does not control, and an upstream response-shape change breaks it silently: playback keeps working while only the voice list fails. `tests/kokoro-integration-test.sh` guards that boundary. It starts a throwaway container (random free port, unique name, `--rm`, no shared volumes or networks, so an existing local server on 8880 is untouched), asserts the endpoints the extension uses, then removes it. Pass `--url` to check a server that is already running and skip docker.
+
+`kokoro_integration_checks.py` reimplements the voice parser from `options/options.js` rather than merely asserting a schema, so a check fails exactly when the real dropdown would come up empty, and reports the raw response shape. When either parser changes, update both. See test-procedure.md section 0 for the full list of assertions.
 
 ### 10.1 Voice Loading
 

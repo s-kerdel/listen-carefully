@@ -11,6 +11,51 @@
 
 ---
 
+## 0. Automated Kokoro-FastAPI Integration Test
+
+Everything below this section is manual. This one is not: it checks that a
+Kokoro-FastAPI server still provides what the extension needs, so an upstream
+release cannot break the Kokoro backend unnoticed.
+
+Run it before publishing, and whenever Kokoro-FastAPI ships a new version.
+
+```bash
+tests/kokoro-integration-test.sh                            # pull latest, test, tear down
+tests/kokoro-integration-test.sh --url http://localhost:8880  # test a server you already run
+tests/kokoro-integration-test.sh --keep                     # leave the container up to inspect
+IMAGE=ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1 tests/kokoro-integration-test.sh
+```
+
+Without `--url` it starts a throwaway container on a random free port with a
+unique name and `--rm`, waits for `/health`, runs the checks, then removes it.
+It never binds 8880 and never touches existing containers, volumes or networks,
+so a Kokoro server you already have running is unaffected.
+
+Requires `docker` and `python3`. The checks themselves are stdlib only. The
+first run pulls a multi-gigabyte image; later runs reuse it, and `--no-pull`
+skips the pull entirely.
+
+**What it asserts:**
+
+| Check | Breaks what, if it fails |
+|-------|--------------------------|
+| `GET /health`, `GET /v1/models` | Server reachable at all |
+| `GET /v1/audio/voices` parses | Voice dropdown is empty |
+| `?legacy=true` returns strings | Older-server compatibility |
+| Voice IDs match `{lang}{gender}_{name}` | Language grouping in the dropdown |
+| `POST /v1/audio/speech` returns audio | Test Connection and voice preview |
+| `POST /dev/captioned_speech` returns `timestamps` | Word-by-word highlighting |
+
+The voice check reimplements the parser from `options/options.js`, so it fails
+exactly when the real dropdown would come up empty, and prints the raw response
+shape so you can see what changed. Keep the two in sync when either changes.
+
+**Pass:** `All 7 checks passed`, exit code 0.
+**Fail:** any `[FAIL]` line, exit code 1. The detail column names the endpoint
+and the unexpected shape.
+
+---
+
 ## 1. Selection Mode
 
 **Goal:** Selected text is read, not the whole page or nothing.
