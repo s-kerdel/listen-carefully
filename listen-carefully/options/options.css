@@ -355,8 +355,23 @@ body.dark .voice-limited-note {
 }
 
 /* Extra spacing only when followed by the test button in Kokoro settings */
-#kokoro-settings .kokoro-note {
+#kokoro-settings .kokoro-note,
+#kokorojs-settings .kokoro-note {
   margin-bottom: 14px;
+}
+
+/* The kokoro-js panel stacks plain control groups rather than .kokoro-fields,
+   so it sets its own rhythm. */
+#kokorojs-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.kokoro-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .kokoro-note svg {

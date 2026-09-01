@@ -19,6 +19,7 @@
     noVoicesNote: document.getElementById('voice-no-voices-note'),
     limitedNote: document.getElementById('voice-limited-note'),
     kokoroInfo: document.getElementById('kokoro-info'),
+    kokoroLabel: document.getElementById('kokoro-label'),
     kokoroVoiceLabel: document.getElementById('kokoro-voice-label'),
     rate: document.getElementById('rate'),
     rateValue: document.getElementById('rate-value'),
@@ -107,12 +108,17 @@
 
   // --- Load saved settings ---
 
-  function updateBackendUI(backend, kokoroVoice) {
-    const isKokoro = backend === 'kokoro';
+  function updateBackendUI(backend, settings) {
+    const isKokoro = isKokoroBackend(backend);
+    const isKokoroJs = backend === 'kokorojs';
     els.voiceGroup.hidden = isKokoro;
     els.kokoroInfo.hidden = !isKokoro;
-    if (isKokoro && kokoroVoice) {
-      els.kokoroVoiceLabel.textContent = formatKokoroVoice(kokoroVoice);
+    if (!isKokoro) return;
+
+    els.kokoroLabel.textContent = isKokoroJs ? 'Kokoro-js' : 'Kokoro';
+    const voice = isKokoroJs ? settings.kokoroJsVoice : settings.kokoroVoice;
+    if (voice) {
+      els.kokoroVoiceLabel.textContent = formatKokoroVoice(voice);
     }
   }
 
@@ -126,7 +132,7 @@
         els.volumeValue.textContent = Math.round(settings.volume * 100) + '%';
         els.autoScroll.checked = settings.autoScroll;
         els.showAllLanguages.setAttribute('aria-pressed', String(!!settings.showAllLanguages));
-        updateBackendUI(settings.ttsBackend, settings.kokoroVoice);
+        updateBackendUI(settings.ttsBackend, settings);
         resolve(settings);
       });
     });
@@ -304,7 +310,7 @@
 
   // --- Initialize ---
   loadSettings().then((settings) => {
-    if (settings.ttsBackend !== 'kokoro') loadVoices();
+    if (!isKokoroBackend(settings.ttsBackend)) loadVoices();
     syncState();
     // Poll state while popup is open - ensures progress/info stay current
     // even if runtime messages are missed

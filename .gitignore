@@ -1,3 +1,14 @@
+# Packaged extension builds (pack.sh output)
 *.zip
+
+# Vendoring toolchain - the generated artifacts under listen-carefully/vendor/
+# are committed so the extension stays buildless; the dependency tree is not.
+build/node_modules/
+build/package-lock.json
+
+# OS cruft
 .DS_Store
 Thumbs.db
+
+# playwright-cli session artifacts
+.playwright-cli/
