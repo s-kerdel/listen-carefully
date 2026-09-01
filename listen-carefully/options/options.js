@@ -153,7 +153,13 @@
       }
 
       const data = await res.json();
-      const voices = Array.isArray(data.voices) ? data.voices.filter(v => typeof v === 'string') : [];
+      // Kokoro-FastAPI >= v0.4.0 returns [{id, name}, ...]; older builds returned
+      // plain strings. Accept both so the dropdown works against either server.
+      const voices = Array.isArray(data.voices)
+        ? data.voices
+            .map(v => (typeof v === 'string' ? v : v?.id))
+            .filter(v => typeof v === 'string' && v)
+        : [];
       if (voices.length === 0) {
         showError(`Kokoro server at ${endpoint} returned no voices`);
         return;
