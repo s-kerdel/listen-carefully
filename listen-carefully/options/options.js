@@ -23,6 +23,13 @@
     btnRefreshKokoro: document.getElementById('btn-refresh-kokoro'),
     btnTestKokoro: document.getElementById('btn-test-kokoro'),
     kokoroTestResult: document.getElementById('kokoro-test-result'),
+    kokoroJsSettings: document.getElementById('kokorojs-settings'),
+    kokoroJsVoice: document.getElementById('kokorojs-voice'),
+    kokoroJsDevice: document.getElementById('kokorojs-device'),
+    kokoroJsIdleUnload: document.getElementById('kokorojs-idle-unload'),
+    btnTestKokoroJs: document.getElementById('btn-test-kokorojs'),
+    btnUnloadKokoroJs: document.getElementById('btn-unload-kokorojs'),
+    kokoroJsTestResult: document.getElementById('kokorojs-test-result'),
     voiceSection: document.getElementById('voice-section'),
     voice: document.getElementById('voice'),
     showAllLanguages: document.getElementById('show-all-languages'),
@@ -94,14 +101,43 @@
   // --- Backend UI toggle ---
 
   function updateBackendUI(backend) {
-    const isKokoro = backend === 'kokoro';
-    els.kokoroSettings.hidden = !isKokoro;
+    const isFastApi = backend === 'kokoro';
+    const isKokoroJs = backend === 'kokorojs';
+    const isKokoro = isKokoroBackend(backend);
+    els.kokoroSettings.hidden = !isFastApi;
+    els.kokoroJsSettings.hidden = !isKokoroJs;
     els.voiceSection.hidden = isKokoro;
-    // Pitch is not supported by Kokoro
+    // Pitch is not supported by either Kokoro backend
     const pitchGroup = els.pitch.closest('.slider-group');
     pitchGroup.style.opacity = isKokoro ? '0.4' : '';
     els.pitch.disabled = isKokoro;
-    if (isKokoro) loadKokoroOptions();
+    if (isFastApi) loadKokoroOptions();
+  }
+
+  // --- Kokoro-js (in-browser model) ---
+
+  /**
+   * Kokoro-js ships a fixed voice list, so unlike the FastAPI backend there is
+   * nothing to query - the dropdown fills synchronously, before the model has
+   * been downloaded.
+   */
+  function populateKokoroJsVoices(savedVoice) {
+    els.kokoroJsVoice.replaceChildren();
+    for (const id of KOKOROJS_VOICES) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = formatKokoroVoice(id);
+      els.kokoroJsVoice.appendChild(opt);
+    }
+    els.kokoroJsVoice.value = KOKOROJS_VOICES.includes(savedVoice)
+      ? savedVoice
+      : SETTINGS_DEFAULTS.kokoroJsVoice;
+  }
+
+  function showKokoroJsResult(text, kind) {
+    els.kokoroJsTestResult.hidden = false;
+    els.kokoroJsTestResult.textContent = text;
+    els.kokoroJsTestResult.className = `test-result ${kind}`;
   }
 
   // --- Load Kokoro voices and models from API ---
@@ -276,6 +312,9 @@
     els.ttsBackend.value = s.ttsBackend;
     els.kokoroEndpoint.value = s.kokoroEndpoint;
     els.kokoroVoice.value = s.kokoroVoice;
+    populateKokoroJsVoices(s.kokoroJsVoice);
+    els.kokoroJsDevice.value = s.kokoroJsDevice;
+    els.kokoroJsIdleUnload.value = String(s.kokoroJsIdleUnload);
     updateBackendUI(s.ttsBackend);
 
     els.rate.value = s.rate;
@@ -393,20 +432,40 @@
   els.ttsBackend.addEventListener('change', async () => {
     const backend = els.ttsBackend.value;
 
-    if (backend === 'kokoro') {
-      // Request localhost permission on first Kokoro activation
-      const granted = await chrome.permissions.request({
-        origins: ['http://localhost/*', 'http://127.0.0.1/*'],
-      }).catch(() => false);
+    // permissions.request rejects when denied, but *throws synchronously* when
+    // Chrome decides there was no user gesture - so both need catching, or the
+    // engine switch is abandoned before anything is saved.
+    const requestOrigins = async (origins) => {
+      try {
+        return await chrome.permissions.request({ origins });
+      } catch {
+        return false;
+      }
+    };
 
+    // Kokoro-FastAPI cannot work at all without loopback access, so a refusal
+    // cancels the switch.
+    if (backend === 'kokoro') {
+      const granted = await requestOrigins(['http://localhost/*', 'http://127.0.0.1/*']);
       if (!granted) {
         els.ttsBackend.value = 'browser';
         return;
       }
     }
 
+    // Kokoro-js only needs Hugging Face for the one-time model download, and
+    // the hub already serves those files with permissive CORS - so ask (it
+    // hardens the download against a redirect to a stricter host) but keep the
+    // engine selected either way.
+    if (backend === 'kokorojs') {
+      await requestOrigins([
+        'https://huggingface.co/*', 'https://*.hf.co/*', 'https://*.huggingface.co/*',
+      ]);
+    }
+
     stopAllPreviews();
     els.kokoroTestResult.hidden = true;
+    els.kokoroJsTestResult.hidden = true;
     updateBackendUI(backend);
     save({ ttsBackend: backend });
   });
@@ -428,6 +487,100 @@
   els.kokoroVoice.addEventListener('change', () => saveKokoroSetting('kokoroVoice', els.kokoroVoice));
 
   els.btnRefreshKokoro.addEventListener('click', loadKokoroOptions);
+
+  els.kokoroJsVoice.addEventListener('change', () => save({ kokoroJsVoice: els.kokoroJsVoice.value }));
+
+  els.kokoroJsIdleUnload.addEventListener('change', () => {
+    // Takes effect on the next synthesis, which is when the timer is re-armed.
+    save({ kokoroJsIdleUnload: Number(els.kokoroJsIdleUnload.value) });
+  });
+
+  // Frees the model's memory now rather than waiting out the idle timer.
+  els.btnUnloadKokoroJs.addEventListener('click', async () => {
+    els.btnUnloadKokoroJs.disabled = true;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'kokoroJsUnload' });
+      if (res?.error) {
+        showKokoroJsResult(`Could not unload: ${res.error}`, 'error');
+      } else if (res?.unloaded) {
+        showKokoroJsResult('Model unloaded - memory released.', 'success');
+        setTimeout(() => { els.kokoroJsTestResult.hidden = true; }, 3000);
+      } else {
+        showKokoroJsResult('Model was not loaded.', 'testing');
+        setTimeout(() => { els.kokoroJsTestResult.hidden = true; }, 3000);
+      }
+    } catch (err) {
+      showKokoroJsResult(`Could not unload: ${err.message}`, 'error');
+    } finally {
+      els.btnUnloadKokoroJs.disabled = false;
+    }
+  });
+
+  els.kokoroJsDevice.addEventListener('change', () => {
+    // WebGPU needs fp32 weights and wasm needs q8; kokoro-js produces silence
+    // rather than an error on a mismatched pair, so the two move together.
+    save({ kokoroJsDevice: els.kokoroJsDevice.value });
+    els.kokoroJsTestResult.hidden = true;
+  });
+
+  // Downloads the model (or reuses the cached copy) and speaks one sentence.
+  // The offscreen document owns the load, so progress is polled from it
+  // rather than pushed - a background broadcast would have no receiver
+  // whenever this page is closed.
+  els.btnTestKokoroJs.addEventListener('click', async () => {
+    const device = els.kokoroJsDevice.value;
+    els.btnTestKokoroJs.disabled = true;
+    showKokoroJsResult('Preparing model - the first run downloads about 90 MB...', 'testing');
+
+    const poll = setInterval(async () => {
+      const st = await chrome.runtime.sendMessage({ type: 'kokoroJsStatus', device })
+        .catch(() => null);
+      if (st?.state === 'loading' && st.progress > 0) {
+        showKokoroJsResult(`Downloading model... ${st.progress}%`, 'testing');
+      }
+    }, 500);
+
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: 'kokoroJsTTS',
+        text: 'Kokoro running locally in your browser. This is a test.',
+        voice: els.kokoroJsVoice.value || SETTINGS_DEFAULTS.kokoroJsVoice,
+        speed: parseFloat(els.rate.value) || 1.0,
+        device,
+        idleUnloadMinutes: Number(els.kokoroJsIdleUnload.value),
+      });
+      clearInterval(poll);
+
+      if (!result || result.error) {
+        showKokoroJsResult(`Test failed: ${result?.error || 'no response'}`, 'error');
+        return;
+      }
+
+      const raw = atob(result.audio);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: result.audio_format }));
+      const audio = new Audio(url);
+      _testAudio = audio;
+      audio.volume = parseFloat(els.volume.value) || 1.0;
+      const revoke = () => { URL.revokeObjectURL(url); if (_testAudio === audio) _testAudio = null; };
+      const label = result.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WebAssembly)';
+      audio.onended = () => {
+        revoke();
+        showKokoroJsResult(`Model ready - running on ${label}`, 'success');
+        setTimeout(() => { els.kokoroJsTestResult.hidden = true; }, 3000);
+      };
+      audio.onerror = revoke;
+      audio.play().catch(revoke);
+      showKokoroJsResult(`Model ready (${label}) - playing test audio...`, 'success');
+    } catch (err) {
+      clearInterval(poll);
+      showKokoroJsResult(`Test failed: ${err.message}`, 'error');
+    } finally {
+      clearInterval(poll);
+      els.btnTestKokoroJs.disabled = false;
+    }
+  });
 
   // isLocalhostURL loaded from lib/config.js
 

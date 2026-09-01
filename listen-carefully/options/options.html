@@ -193,8 +193,48 @@
           <label for="tts-backend">Engine</label>
           <select id="tts-backend">
             <option value="browser">Browser (Web Speech API)</option>
+            <option value="kokorojs">Kokoro-js (In-browser, no server)</option>
             <option value="kokoro">Kokoro-FastAPI (Local API)</option>
           </select>
+        </div>
+        <div id="kokorojs-settings" hidden>
+          <div class="control-group">
+            <label for="kokorojs-voice">Voice</label>
+            <select id="kokorojs-voice"></select>
+          </div>
+          <div class="control-group">
+            <label for="kokorojs-device">Acceleration</label>
+            <select id="kokorojs-device">
+              <option value="wasm">CPU (WebAssembly) - works everywhere</option>
+              <option value="webgpu">GPU (WebGPU) - faster, needs GPU support</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="kokorojs-idle-unload">Unload model when idle</label>
+            <select id="kokorojs-idle-unload">
+              <option value="1">After 1 minute</option>
+              <option value="5">After 5 minutes</option>
+              <option value="15">After 15 minutes</option>
+              <option value="0">Never - keep it loaded</option>
+            </select>
+          </div>
+          <div class="kokoro-note" role="note">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            Runs the Kokoro model inside your browser - no server to install and nothing leaves your device. The model (about 90 MB) downloads from Hugging Face the first time and is cached afterwards. Kokoro-js returns no word timings, so the active-word marker is estimated from the audio length and may drift slightly.
+            <br><br>
+            While loaded, the model stays in memory - video memory when running on the GPU - so reading stays instant across tabs. Unloading frees it; the next read reloads from the browser cache, which costs a few seconds but no new download. <strong>Never</strong> keeps it resident until you restart the browser.
+          </div>
+          <div class="kokoro-buttons">
+            <button id="btn-test-kokorojs" class="btn" type="button" aria-label="Download and test the Kokoro-js model">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Download &amp; Test Model
+            </button>
+            <button id="btn-unload-kokorojs" class="btn" type="button" aria-label="Unload the Kokoro-js model from memory now">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+              Unload Now
+            </button>
+          </div>
+          <div id="kokorojs-test-result" class="test-result" role="status" aria-live="polite" hidden></div>
         </div>
         <div id="kokoro-settings" hidden>
           <div class="kokoro-fields">

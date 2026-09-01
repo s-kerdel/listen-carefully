@@ -1,0 +1,15 @@
+{
+  "name": "listen-carefully-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vendors kokoro-js and ONNX Runtime Web into listen-carefully/vendor/ so the extension ships without a build step.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "kokoro-js": "^1.2.1"
+  }
+}

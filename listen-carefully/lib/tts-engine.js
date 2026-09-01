@@ -1,11 +1,15 @@
 /**
- * TTS Engine - supports both Web Speech Synthesis API and Kokoro (OpenAI-compatible) TTS.
+ * TTS Engine - supports the Web Speech Synthesis API and two Kokoro backends.
  *
  * Browser backend: wraps speechSynthesis with sentence-level queue management.
- * Kokoro backend: fetches audio from local API, plays via Audio element
- * (with AudioContext fallback for CSP-restricted pages), cleans non-word
- * token prefixes before synthesis, and estimates word boundaries for
- * highlighting.
+ * Kokoro backends: obtain audio for one sentence at a time and play it via an
+ * Audio element (with AudioContext fallback for CSP-restricted pages),
+ * cleaning non-word token prefixes before synthesis. Two sources:
+ *   'kokoro'   - Kokoro-FastAPI over HTTP; returns real word timestamps.
+ *   'kokorojs' - kokoro-js running locally in the extension's offscreen
+ *                document; returns audio only, so word boundaries are
+ *                estimated from the clip duration.
+ * Both share every playback and word-sync path below.
  *
  * Chromium silently stops long utterances (~15s), so the browser backend
  * chunks text into sentences and feeds them one at a time.
@@ -27,6 +31,9 @@ class TTSEngine {
       ttsBackend: 'browser',
       kokoroEndpoint: 'http://localhost:8880',
       kokoroVoice: SETTINGS_DEFAULTS.kokoroVoice,
+      kokoroJsVoice: SETTINGS_DEFAULTS.kokoroJsVoice,
+      kokoroJsDevice: SETTINGS_DEFAULTS.kokoroJsDevice,
+      kokoroJsIdleUnload: SETTINGS_DEFAULTS.kokoroJsIdleUnload,
     };
 
     // Kokoro playback state
@@ -64,7 +71,11 @@ class TTSEngine {
   }
 
   get _isKokoro() {
-    return this.settings.ttsBackend === 'kokoro';
+    return isKokoroBackend(this.settings.ttsBackend);
+  }
+
+  get _isKokoroJs() {
+    return this.settings.ttsBackend === 'kokorojs';
   }
 
   _loadVoices() {
@@ -121,6 +132,7 @@ class TTSEngine {
   static _SETTINGS_KEYS = [
     'voiceURI', 'rate', 'pitch', 'volume', 'ttsBackend',
     'kokoroEndpoint', 'kokoroVoice',
+    'kokoroJsVoice', 'kokoroJsDevice', 'kokoroJsIdleUnload',
   ];
 
   // Numeric settings with [min, max] clamps. Values outside the range -
@@ -184,6 +196,8 @@ class TTSEngine {
         const needsRefetch = this.settings.rate !== prev.rate
           || this.settings.kokoroVoice !== prev.kokoroVoice
           || this.settings.kokoroEndpoint !== prev.kokoroEndpoint
+          || this.settings.kokoroJsVoice !== prev.kokoroJsVoice
+          || this.settings.kokoroJsDevice !== prev.kokoroJsDevice
           || this.settings.ttsBackend !== prev.ttsBackend;
         if (!needsRefetch) return;
       }
@@ -424,13 +438,42 @@ class TTSEngine {
     speechSynthesis.speak(utterance);
   }
 
-  // --- Kokoro (API) backend ---
+  // --- Kokoro backends (FastAPI + kokoro-js) ---
+
+  /**
+   * Ask the active Kokoro source for one sentence of audio. Both routes go
+   * through the service worker: the FastAPI one to dodge per-site permission
+   * prompts on cross-origin fetches, the kokoro-js one because only the
+   * worker can address the offscreen document that holds the model.
+   * Resolves to `{ audio (base64), audio_format, timestamps?, duration? }`
+   * or `{ error }`.
+   */
+  _requestKokoroAudio(kokoroText) {
+    if (this._isKokoroJs) {
+      return chrome.runtime.sendMessage({
+        type: 'kokoroJsTTS',
+        text: kokoroText,
+        voice: this.settings.kokoroJsVoice || SETTINGS_DEFAULTS.kokoroJsVoice,
+        speed: this.settings.rate || 1.0,
+        device: this.settings.kokoroJsDevice || SETTINGS_DEFAULTS.kokoroJsDevice,
+        idleUnloadMinutes: this.settings.kokoroJsIdleUnload,
+      });
+    }
+
+    const endpoint = (this.settings.kokoroEndpoint || 'http://localhost:8880').replace(/\/+$/, '');
+    return chrome.runtime.sendMessage({
+      type: 'kokoroTTS',
+      text: kokoroText,
+      endpoint,
+      voice: this.settings.kokoroVoice || SETTINGS_DEFAULTS.kokoroVoice,
+      speed: this.settings.rate || 1.0,
+    });
+  }
 
   async _speakNextKokoro() {
     const text = this.queue[this.currentIndex];
     const sentenceIndex = this.currentIndex;
     const gen = this._cancelGen;
-    const endpoint = (this.settings.kokoroEndpoint || 'http://localhost:8880').replace(/\/+$/, '');
 
     // Clean text for Kokoro: expand or strip leading non-word chars from
     // tokens to prevent Kokoro from truncating timestamps at special chars.
@@ -452,15 +495,7 @@ class TTSEngine {
     if (this.onSentenceStart) this.onSentenceStart(sentenceIndex);
 
     try {
-      // Route through background service worker to avoid per-site permission prompts.
-      // Background validates localhost and returns JSON (base64 audio + timestamps).
-      const data = await chrome.runtime.sendMessage({
-        type: 'kokoroTTS',
-        text: kokoroText,
-        endpoint,
-        voice: this.settings.kokoroVoice || SETTINGS_DEFAULTS.kokoroVoice,
-        speed: this.settings.rate || 1.0,
-      });
+      const data = await this._requestKokoroAudio(kokoroText);
 
       // Bail if cancelled (settings change / stop / skip) while fetch was in-flight
       if (this._cancelGen !== gen) return;
@@ -493,9 +528,17 @@ class TTSEngine {
       // Build word positions (charIndex/charLength in the sentence text)
       this._wordPositions = this._computeWordPositions(text);
 
-      // Build word timing from API timestamps (capped to prevent DoS)
+      // Build word timing from API timestamps (capped to prevent DoS).
+      // kokoro-js sends none - it reports the clip duration instead, which
+      // lets us lay out estimated boundaries before playback rather than
+      // waiting on the Audio element's loadedmetadata event.
       const timestamps = (data.timestamps || []).slice(0, 5000);
       this._wordTimestamps = this._buildWordTimestamps(timestamps);
+      if (this._wordTimestamps.length === 0
+          && this._wordPositions.length > 0
+          && Number.isFinite(data.duration) && data.duration > 0) {
+        this._wordTimestamps = this._estimateWordTimestamps(data.duration);
+      }
 
       if (this._cspFallback) {
         await this._kokoroPlayAudioCtx(bytes, sentenceIndex, gen);
@@ -613,12 +656,16 @@ class TTSEngine {
   /** Shared failure handler: count consecutive errors, stop after 3. */
   _handleKokoroFailure() {
     this._kokoroFailCount++;
+    const fatal = this._isKokoroJs
+      ? 'Kokoro-js failed to synthesize. Check the model download in Settings.'
+      : 'Kokoro TTS not responding. Is the service running?';
+    const retry = this._isKokoroJs ? 'Kokoro-js: synthesis failed' : 'Kokoro TTS: connection failed';
     if (this._kokoroFailCount >= 3) {
-      if (this.onError) this.onError('Kokoro TTS not responding. Is the service running?');
+      if (this.onError) this.onError(fatal);
       this.stop();
       return;
     }
-    if (this.onError) this.onError(`Kokoro TTS: connection failed, retrying... (${this._kokoroFailCount}/3)`);
+    if (this.onError) this.onError(`${retry}, retrying... (${this._kokoroFailCount}/3)`);
     if (this.state === 'playing') this._speakNext();
   }
 

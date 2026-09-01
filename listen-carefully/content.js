@@ -95,6 +95,9 @@
             ttsBackend: settings.ttsBackend,
             kokoroEndpoint: settings.kokoroEndpoint,
             kokoroVoice: settings.kokoroVoice,
+            kokoroJsVoice: settings.kokoroJsVoice,
+            kokoroJsDevice: settings.kokoroJsDevice,
+            kokoroJsIdleUnload: settings.kokoroJsIdleUnload,
           });
           highlighter.updateSettings({
             highlightBg: settings.highlightBg,
@@ -363,7 +366,9 @@
           const has = (k) => msg.settings[k] !== undefined;
           const engineKeysChanged = has('voiceURI') || has('rate') || has('pitch')
             || has('volume') || has('ttsBackend') || has('kokoroEndpoint')
-            || has('kokoroVoice');
+            || has('kokoroVoice') || has('kokoroJsVoice')
+            || has('kokoroJsDevice')
+            || has('kokoroJsIdleUnload');
           if (engineKeysChanged) {
             engine.updateSettings(msg.settings);
           }

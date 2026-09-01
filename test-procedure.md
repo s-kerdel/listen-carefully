@@ -216,3 +216,46 @@ of `{id, name}` objects. The extension must handle both.)
 **Pass:** The dropdown populates with grouped voices regardless of which shape the
 server returns. Voice IDs render as friendly names ("Alloy - Female (American English)").
 **Fail:** "Kokoro server at ... returned no voices" while the curl above clearly lists voices.
+
+---
+
+## 12. Kokoro-js (in-browser engine)
+
+**Goal:** The in-browser engine downloads its model, synthesizes, and releases
+memory again - with no server running.
+
+### 12a. First run and reading
+
+1. Open the Options page, set **TTS Engine** to **Kokoro-js**, accept the Hugging Face prompt
+2. Click **Download & Test Model** (CPU acceleration), then read any article
+
+**Pass:** A rising "Downloading model... N%" then a spoken test sentence; reading plays
+sentence by sentence with the marker advancing. Kokoro-js reports no word timings, so the
+marker is estimated from clip length - slight drift within a sentence that resets at each
+sentence boundary is expected; a marker frozen on the first word is not. The browser voice
+section and pitch slider must be hidden/disabled while this engine is selected.
+**Fail:** The percentage never moves, the test errors, or audio stops after one sentence.
+
+Re-opening the page and testing again must skip the download entirely (cached).
+
+### 12b. WebGPU and fallback
+
+Set **Acceleration** to **GPU (WebGPU)** and re-test (a larger model downloads once).
+
+**Pass:** Status reports "running on GPU (WebGPU)" and synthesis is faster. On a machine
+without WebGPU it falls back silently and reports "CPU (WebAssembly)".
+**Fail:** The test errors instead of falling back.
+
+### 12c. Memory is released
+
+1. With the model loaded, note GPU/RAM usage, then click **Unload Now**
+2. Set **Unload model when idle** to **After 1 minute**, read a page, stop, and wait
+
+**Pass:** The button reports "Model unloaded - memory released." and usage drops back;
+a second press reads "Model was not loaded." rather than erroring. About a minute after
+the last sentence the model unloads on its own - verify via `chrome://extensions` > the
+extension's **service worker** console >
+`chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` returning empty.
+Reading again works after a short reload pause with no download. **Never** keeps it
+resident.
+**Fail:** Memory stays allocated, or the timer fires mid-playback and cuts a sentence short.

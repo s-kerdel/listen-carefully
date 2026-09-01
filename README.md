@@ -11,10 +11,10 @@ A browser extension that reads web pages aloud with real-time word-level highlig
 3. **Focus mode.** Dims the surrounding text to show only the active text block, sentence, or line. Choose between **Fade surroundings** (non-active text fades, active text keeps its original page color) and **Color band** (active text paints in your highlight color) for different levels of emphasis.
 4. **Keyboard shortcuts.** Play, pause, stop, skip, and adjust speed without touching the mouse. Shortcuts use `stopPropagation` to prevent conflicts with site access keys.
 5. **Voice selection with smart defaults.** Access all voices installed on your system, including Windows 11 and macOS neural voices, grouped by language. On first run the extension auto-picks the best available voice for your browser language, preferring premium / natural voices, then your system default voice (Samantha on macOS, Zira on Windows, etc.), then any local voice. The dropdown filters to your browser's preferred languages by default with a one-click "Show all languages" toggle to reveal the full list. Google voices remain selectable (active text/sentence focus and color modes still work), but they don't expose word boundaries, so the active-word marker is suppressed, active-line focus falls back to active-text, and a warning is shown above the dropdown when one is active. Their playback rate is also capped at 2x, above which they return no audio.
-6. **Kokoro TTS support.** Optionally connect to a local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server for higher quality voices with word-level timestamps. Supports the full voice list reported by your server (68 voices across 9 languages on Kokoro-FastAPI 0.8.x); the dropdown is built from the server's own response, so newer voices appear automatically. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
+6. **Kokoro TTS support.** Two ways to run the Kokoro model. **Kokoro-js** runs it inside the browser with nothing to install - pick the engine, and the extension downloads the model once (about 90 MB) and synthesizes locally from then on, optionally on the GPU via WebGPU. **Kokoro-FastAPI** connects to a local server for higher quality voices with word-level timestamps. Supports the full voice list reported by your server (68 voices across 9 languages on Kokoro-FastAPI 0.8.x); the dropdown is built from the server's own response, so newer voices appear automatically. English voices provide precise word highlighting via API timestamps; other languages use estimated timing.
 7. **Smart content detection.** Automatically finds article titles even when they sit outside the content container. Expands to include heading siblings and falls back to broader containers when skip selectors filter out all text.
 8. **Precise selection mode.** Selected text mode trims words at the exact selection boundary, and preserves the selection range if the popup steals focus.
-9. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro-FastAPI backend communicates only with a localhost service.
+9. **Fully offline.** No API keys, no accounts, no telemetry. All processing happens locally in your browser. Whether speech synthesis itself stays offline depends on the voice selected in your operating system or browser, not on this extension. The optional Kokoro-FastAPI backend communicates only with a localhost service; the Kokoro-js backend contacts Hugging Face once to download the model, then runs entirely offline.
 10. **Local file support.** Can read local HTML and text files when "Allow access to file URLs" is enabled in the browser's extension settings.
 
 ## Installation
@@ -50,6 +50,18 @@ The "Online (Natural)" voices (such as Microsoft Ava, Andrew, and Jenny) provide
 The "Siri" and "Enhanced" voices provide higher quality than the default system voices.
 
 **Note:** some macOS voices may connect to Apple's cloud services for speech synthesis. This is handled by the operating system, not by this extension. See the privacy policy for details.
+
+### Kokoro-js (optional, no server)
+
+Runs the Kokoro model directly in your browser through [kokoro-js](https://www.npmjs.com/package/kokoro-js) - no server, no Docker, no Python.
+
+1. Open **Settings** and change the **TTS Engine** to **Kokoro-js (In-browser, no server)**.
+2. Pick a voice and, if your GPU supports WebGPU, switch **Acceleration** to GPU.
+3. Click **Download & Test Model**. The first run downloads the model weights (about 90 MB on CPU, larger on GPU) from Hugging Face and caches them in the browser; later runs are instant.
+
+The model runs in an extension-owned offscreen document, so it loads once and stays warm across tabs. While loaded it holds its weights in memory - measured at about 684 MiB of VRAM on the WebGPU path - so **Unload model when idle** (1 / 5 / 15 minutes, or Never) releases it after a period of inactivity, and **Unload Now** frees it immediately. Reloading afterwards comes from the browser cache, costing a few seconds rather than a fresh download. Kokoro-js returns audio without word timings, so the active-word marker is estimated from the clip length and can drift slightly - the Kokoro-FastAPI backend below is the option to use when exact word timestamps matter.
+
+CPU (WebAssembly) synthesis is noticeably slower than a GPU or a native server, so expect a short pause before the first sentence of a paragraph on lower-end hardware.
 
 ### Kokoro-FastAPI (optional)
 
@@ -97,7 +109,7 @@ Right-click anywhere on a page and select **Read from here** to begin reading fr
 
 Open the full settings panel by clicking **Settings** at the bottom of the popup, or by right-clicking the extension icon and selecting **Options**.
 
-Available settings include TTS engine selection (Browser or Kokoro), voice selection with preview, "Show all languages" toggle to widen the voice list beyond your browser's preferred languages, speed, volume, pitch (browser only), highlight colors with presets, word marker style (colored word + underline, colored word only, or marked background), content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active text, active sentence, or active line) with configurable dim style, auto-scroll toggle, and per-site CSS selector overrides for content detection. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
+Available settings include TTS engine selection (Browser, Kokoro-js, or Kokoro-FastAPI), voice selection with preview, "Show all languages" toggle to widen the voice list beyond your browser's preferred languages, speed, volume, pitch (browser only), highlight colors with presets, word marker style (colored word + underline, colored word only, or marked background), content filtering (skip code blocks, figure captions, links), punctuation-based sentence splitting, focus mode (active text, active sentence, or active line) with configurable dim style, auto-scroll toggle, and per-site CSS selector overrides for content detection. When Kokoro is selected, the voice dropdown populates from the API with voices grouped by language.
 
 ## Technical documentation
 
@@ -123,6 +135,7 @@ Listen Carefully does not collect, store, or transmit any user data to external 
 - **Page content:** the extension reads the text content of the active page to convert it to speech. This text is processed entirely within your browser and is never sent to any external server.
 - **Local storage:** user preferences (voice, speed, colors, etc.) are stored locally on your device.
 - **Optional localhost access:** when the Kokoro-FastAPI backend is enabled, the extension communicates with a local server on your machine (`localhost`). This requires an explicit permission grant and no data leaves your device.
+- **Optional Hugging Face access:** when the Kokoro-js backend is enabled, the extension downloads the Kokoro model weights from `huggingface.co` once and caches them in your browser. Only the model files are requested - no page content, and nothing identifying you, is ever sent.
 
 **What the extension does NOT do:**
 - Collect or transmit personal data.

@@ -2,21 +2,37 @@
 
 ## 1. Overview
 
-Listen Carefully is a Chromium-based browser extension that converts webpage text to speech. It supports two TTS backends: the built-in Web Speech API (default) and an optional local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server. The Kokoro backend targets that implementation specifically - it depends on `GET /v1/audio/voices` and `POST /dev/captioned_speech`, which other Kokoro packagings do not provide. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser with no external network dependencies. The Kokoro backend communicates only with localhost.
+Listen Carefully is a Chromium-based browser extension that converts webpage text to speech. It supports three TTS backends: the built-in Web Speech API (default), [kokoro-js](https://www.npmjs.com/package/kokoro-js) running the Kokoro model in-browser, and an optional local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server. The FastAPI backend targets that implementation specifically - it depends on `GET /v1/audio/voices` and `POST /dev/captioned_speech`, which other Kokoro packagings do not provide. It highlights the currently spoken word in real time on the page, supports multiple reading modes, and operates entirely within the browser. The FastAPI backend communicates only with localhost; the kokoro-js backend contacts Hugging Face once to download the model weights and is offline thereafter.
 
 The extension is built on Manifest V3 and targets Chrome and Brave on Windows 11, where Microsoft neural voices provide high quality speech synthesis through the operating system.
 
 ## 2. Architecture
 
-The extension consists of four layers that communicate through Chrome's messaging API.
+The extension consists of five layers that communicate through Chrome's messaging API. The offscreen document (2.1.1) exists only when the kokoro-js engine is in use.
 
 ### 2.1 Background Service Worker
 
 File: `background.js`
 
-The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has two responsibilities: managing the right-click context menu entry ("Read from here") and proxying Kokoro TTS API requests.
+The service worker is the only component that persists across tab changes. It imports `lib/config.js` via `importScripts` for shared utilities (`isLocalhostURL`, etc.). It has three responsibilities: managing the right-click context menu entry ("Read from here"), proxying Kokoro-FastAPI requests, and owning the lifecycle of the offscreen document that runs kokoro-js.
 
 Kokoro fetches are routed through the service worker rather than the content script to avoid Chrome's per-site permission prompts for cross-origin localhost requests. The service worker validates the endpoint against localhost, fetches from the Kokoro API, and returns the JSON response (base64 audio + timestamps) via `sendResponse`. This is fully JSON-serializable and avoids the ArrayBuffer transfer limitations of Chrome extension messaging.
+
+For the kokoro-js backend the worker is a relay rather than a proxy. Content scripts cannot address an offscreen document, so `kokoroJsTTS` / `kokoroJsPreload` / `kokoroJsStatus` messages arrive at the worker, which calls `ensureOffscreen()` and forwards them carrying a `target: 'offscreen-kokorojs'` marker. `ensureOffscreen()` probes `chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` before creating and single-flights creation through `_offscreenCreating`, because `createDocument()` rejects when a document already exists or another call is still in flight - and the worker can be evicted between any two calls. The worker's own `onMessage` listener returns early on the `target` marker so it never handles its own relayed traffic.
+
+### 2.1.1 Offscreen Document
+
+Files: `offscreen/offscreen.html`, `offscreen/offscreen.js`
+
+Hosts the kokoro-js ONNX session. The service worker is unsuitable: it is evicted after roughly 30 seconds idle, which would discard the loaded model and force a re-initialization on every sentence, and it exposes no WebGPU adapter. The content script is unsuitable too - it runs per-tab under the *page's* CSP, where wasm compilation is routinely blocked, and each tab would load its own copy. The offscreen document is a single extension-origin page that lives until closed, so the model loads once and is shared by every tab.
+
+It only generates audio; WAV bytes travel back to the content script, which plays them through the same path as the Kokoro-FastAPI backend, so word-highlight synchronization keeps a single implementation. Loads are keyed on `device` and shared through `ttsPromise`, so a burst of sentences triggers one download rather than several. Generation is serialized through `generateChain` because the ONNX session is not reentrant. The `dtype` follows the device (webgpu implies fp32, wasm implies q8, and a mismatched pair yields silence rather than an error), so it is derived here rather than stored.
+
+#### Unloading
+
+A loaded model pins its weights for as long as the document lives - measured at **~684 MiB of VRAM** on a WebGPU/fp32 load, roughly double the fp32 weights, the rest being ORT's buffer cache and intermediate tensors. Chrome sets no lifetime limit here: only the `AUDIO_PLAYBACK` reason carries one, and this document uses `WORKERS`.
+
+Release is therefore explicit, and works by tearing down the whole document rather than disposing the model - closing the page drops the ONNX session and the WebGPU device together, where disposing the model alone would leave ORT's device and buffer cache resident. It happens after `kokoroJsIdleUnload` minutes of inactivity (the document arms a `setTimeout` and calls `window.close()` on itself; the timer is cleared when a request arrives and re-armed only once `pendingRequests` hits zero, so a short timeout cannot fire mid-sentence), or immediately via the **Unload Now** button, which sends `kokoroJsUnload` to the worker. The next request reloads from the browser cache, costing a few seconds rather than a re-download.
 
 ### 2.2 Content Script Layer
 
@@ -50,9 +66,11 @@ The options page is the only component that calls the Kokoro voice listing endpo
 
 ### 3.1 TTSEngine (`lib/tts-engine.js`)
 
-This class manages a sentence-level playback queue and supports two backends: the Web Speech Synthesis API (browser) and Kokoro (local API). The queue design exists to work around a known Chromium limitation where utterances longer than approximately 15 seconds are silently terminated by the browser. The active backend is determined by the `ttsBackend` setting (`'browser'` or `'kokoro'`).
+This class manages a sentence-level playback queue and supports three backends: the Web Speech Synthesis API (browser), Kokoro-FastAPI, and kokoro-js. The queue design exists to work around a known Chromium limitation where utterances longer than approximately 15 seconds are silently terminated by the browser. The active backend is determined by the `ttsBackend` setting (`'browser'`, `'kokoro'`, or `'kokorojs'`).
 
-Each sentence is spoken individually. The browser backend uses `SpeechSynthesisUtterance` objects; the Kokoro backend fetches audio from `POST /dev/captioned_speech` and plays it via an `Audio` element. When a sentence finishes, the engine automatically advances to the next. The engine exposes five callbacks:
+Both Kokoro backends produce one clip of audio per sentence and are handled identically downstream, so every playback, pause, and word-sync path branches on `isKokoroBackend()` (in `lib/config.js`) rather than on an exact backend name. Only `_requestKokoroAudio()` distinguishes them: it sends `kokoroTTS` for the FastAPI route and `kokoroJsTTS` for the offscreen route, and both resolve to the same `{ audio, audio_format, timestamps?, duration? }` shape.
+
+Each sentence is spoken individually. The browser backend uses `SpeechSynthesisUtterance` objects; the Kokoro backends obtain audio and play it via an `Audio` element. When a sentence finishes, the engine automatically advances to the next. The engine exposes five callbacks:
 
 ```
 onBoundary(charIndex, charLength, sentenceIndex)    Called on each word boundary during speech.
@@ -70,9 +88,11 @@ Settings changes (voice, rate, pitch, volume) take effect immediately during pla
 
 #### 3.1.1 Kokoro Word Highlighting
 
-The browser backend receives native `onboundary` events with exact character positions. The Kokoro backend uses word-level timestamps from the API response to achieve the same effect.
+The browser backend receives native `onboundary` events with exact character positions. The Kokoro backends use word-level timestamps to achieve the same effect.
 
 The `/dev/captioned_speech` endpoint returns base64-encoded audio alongside a `timestamps` array containing `{word, start_time, end_time}` entries. English voices support timestamps; non-English voices return `null`, triggering a character-length-weighted estimation fallback.
+
+Kokoro-js exposes no timestamps at all, so it always takes that estimation path. It reports the exact clip `duration` instead, which lets `_estimateWordTimestamps` lay out boundaries before playback starts rather than waiting on the `Audio` element's `loadedmetadata` event. The estimate is character-length weighted, so the marker can drift within a sentence - this is the one functional tradeoff against the FastAPI backend, and the options UI says so.
 
 Word highlighting is synchronized via a `requestAnimationFrame` loop that reads the playback time (`audio.currentTime` or `AudioContext.currentTime` offset) and finds the matching word timestamp using a forward scan from the last matched position (audio time is monotonic, so earlier timestamps are never re-checked). This approach is drift-free and O(1) per frame.
 
@@ -105,7 +125,11 @@ The Highlighter's `suppressWordMarker` flag is recomputed by `content.js` on ini
 
 #### 3.1.3 Security
 
-Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro backend in settings. If the user denies the permission, the backend selection reverts to Browser.
+Localhost access is declared as `optional_host_permissions` in the manifest. The permission is only requested when the user enables the Kokoro-FastAPI backend in settings. If the user denies the permission, the backend selection reverts to Browser.
+
+Hugging Face origins are declared the same way for kokoro-js and requested when that engine is selected, but a refusal does *not* revert the selection: the hub serves the model files with permissive CORS, so the download works without the grant, and the permission only hardens it against a redirect to a stricter host.
+
+MV3 forbids remote code, so nothing is fetched from a CDN at runtime. `build/build.mjs` vendors kokoro-js, transformers.js, and ONNX Runtime Web into `listen-carefully/vendor/`, and `offscreen.js` overrides `env.backends.onnx.wasm.wasmPaths` to the extension's own `vendor/` directory - left alone, transformers.js defaults to jsDelivr. `extension_pages` CSP is set to `script-src 'self' 'wasm-unsafe-eval'` so the ONNX kernel can compile. Extension pages are not cross-origin isolated, so `SharedArrayBuffer` is unavailable; `numThreads` is pinned to 1 to avoid a blob-worker spawn the CSP would block anyway. Kokoro-js request text is capped at 5,000 characters in the service worker, since synthesis time scales with input length and blocks the single ONNX session.
 
 Settings updates use an allowlisted key loop instead of `Object.assign` to prevent prototype pollution. The Kokoro endpoint is validated against localhost (`127.0.0.1`, `localhost`, `[::1]`) before every fetch. Base64 audio payloads are capped at 15MB, MIME types are allowlisted, and timestamp arrays are capped at 5000 entries with type validation on each entry. Blob URLs are revoked on all exit paths. On pages with strict Content Security Policy (e.g. `media-src` directives that block `blob:` URLs), the engine automatically falls back to `AudioContext.decodeAudioData()` which operates on raw `ArrayBuffer`s in memory, bypassing CSP entirely. Stale async responses are guarded via object identity checks after all `await` points. A 3-strike failure counter stops playback if either backend fails repeatedly.
 
@@ -252,9 +276,15 @@ autoScroll        Boolean. Whether to track the active word with a rAF ease
                   loop. Triggers only when the word reaches the top 10% or
                   bottom 10% of the viewport, then eases to park it at ~25%
                   from the top. Pauses for 1.5s after any user-initiated scroll.
-ttsBackend        String. One of: browser, kokoro. Default: browser.
-kokoroEndpoint    String. Kokoro API base URL. Default: http://localhost:8880.
-kokoroVoice       String. Kokoro voice identifier. Default: am_adam.
+ttsBackend        String. One of: browser, kokoro, kokorojs. Default: browser.
+kokoroEndpoint    String. Kokoro-FastAPI base URL. Default: http://localhost:8880.
+kokoroVoice       String. Kokoro-FastAPI voice identifier. Default: am_adam.
+kokoroJsVoice     String. Kokoro-js voice identifier. Default: af_heart.
+kokoroJsDevice    String. One of: wasm, webgpu. Default: wasm. Execution provider
+                  for the in-browser model.
+kokoroJsIdleUnload Number. Minutes of inactivity before the in-browser model is
+                  unloaded; 0 keeps it resident. Default: 5. Offered as 1/5/15/
+                  Never in the options page.
 siteSelectors     Object. Map of hostname to CSS selector for per-site content
                   detection overrides. Default: {} (empty).
 showAllLanguages  Boolean. Default: false. When false, the browser voice
@@ -307,8 +337,11 @@ The popup and options page apply a `dark` class to the body element based on the
 ```
 listen-carefully/
     manifest.json              Extension manifest (Manifest V3). Includes optional_host_permissions
-                               for localhost, requested only when Kokoro is enabled.
-    background.js              Service worker. Context menu, Kokoro TTS proxy.
+                               for localhost and huggingface.co, each requested only when the
+                               matching Kokoro engine is enabled, plus the extension_pages CSP
+                               ('wasm-unsafe-eval') that lets the ONNX kernel compile.
+    background.js              Service worker. Context menu, Kokoro-FastAPI proxy, and
+                               offscreen document lifecycle for kokoro-js.
                                Imports lib/config.js via importScripts.
     content.js                 Content script orchestrator. Playback lifecycle and messaging.
     content.css                ::highlight() rules for lc-word-active / lc-sentence-active.
@@ -317,9 +350,18 @@ listen-carefully/
                                Kokoro voice formatting, isLocalhostURL, safeSave, voice
                                availability + auto-pick (isLimitedVoice, pickDefaultVoice,
                                filterVoicesForDropdown, getUserLangTags / getUserLangPrefixes).
-        tts-engine.js          Dual-backend TTS engine (Web Speech API + Kokoro).
+        tts-engine.js          Three-backend TTS engine (Web Speech API + Kokoro-FastAPI + kokoro-js).
         highlighter.js         CSS Custom Highlight API painter, index-based word mapping, focus mode.
         text-extractor.js      Content detection: findMainContent, findContainerFor.
+    offscreen/
+        offscreen.html         Offscreen document shell (no UI).
+        offscreen.js           Loads and runs the kokoro-js model; returns WAV audio.
+    vendor/                    Generated by build/build.mjs - do not edit by hand.
+        kokoro-js.bundle.mjs   kokoro-js + transformers.js + ONNX Runtime Web, bundled as ESM.
+        ort-wasm-simd-threaded.jsep.wasm
+        ort-wasm-simd-threaded.jsep.mjs
+                               ONNX Runtime kernel + loader, resolved at runtime via
+                               env.wasm.wasmPaths rather than by the bundler.
     popup/
         popup.html             Popup markup.
         popup.js               Popup logic. Playback controls and settings.
@@ -336,26 +378,40 @@ listen-carefully/
 
 ## 10. Development Notes
 
-### 10.1 Voice Loading
+### 10.1 Vendoring kokoro-js
+
+The extension ships without a build step, so `listen-carefully/vendor/` is committed. To regenerate it after a dependency bump:
+
+```
+cd build
+npm install
+node build.mjs
+```
+
+`build/node_modules/` is gitignored; the three build sources (`package.json`, `build.mjs`, `kokoro-entry.mjs`) are tracked.
+
+Two things the bundler cannot be left to default on. First, transformers.js and kokoro-js statically import Node-only modules (`onnxruntime-node`, `sharp`, `fs`, `path`, ...) so one source file can serve both runtimes; marking them `external` is not an option, because the bare specifiers survive into the ESM output and the browser throws `Failed to resolve module specifier "path"` at import time. `build.mjs` stubs them instead - every use sits behind an `apis.IS_NODE_ENV` check that is false here. Second, ONNX Runtime resolves its kernel *and* the matching loader `.mjs` against `env.wasm.wasmPaths` at runtime rather than through the bundler, so both are copied into `vendor/`.
+
+### 10.2 Voice Loading
 
 `speechSynthesis.getVoices()` may return an empty array on the first call. The TTS engine listens for the `voiceschanged` event and reloads the voice list when it fires. The `getVoices` message handler in `content.js` includes a 300ms retry for cases where the popup requests voices before the browser has populated them. Voice auto-pick (Section 3.1.2) is gated on both voices being loaded and settings being applied, so it runs reliably on whichever event arrives second.
 
-### 10.2 Chromium Utterance Limit
+### 10.3 Chromium Utterance Limit
 
 Chromium silently terminates utterances after approximately 15 seconds of continuous speech. The sentence-level queue in TTSEngine is the primary mitigation. Sentences should remain short enough to stay under this limit at 1.0x speed.
 
 Chromium also silently kills paused utterances after approximately 15 seconds, causing `speechSynthesis.resume()` to do nothing. The `resume()` method tracks pause duration via `_pausedAt` and re-speaks the current sentence from the start if more than 14 seconds have elapsed. Additionally, if an utterance finishes while paused (e.g. pausing on the last word), `resume()` detects this via a 100ms check on `speechSynthesis.speaking` and advances to the next sentence instead of getting stuck. The Kokoro backend handles this by checking `this._audio` existence on resume.
 
-### 10.3 Extension Context Invalidation
+### 10.4 Extension Context Invalidation
 
 When the extension is reloaded during development, content scripts on already-open pages lose their connection to the extension runtime. The `safeCall` wrapper in `content.js` and the `.catch(() => {})` on all `sendMessage` calls prevent errors from surfacing in these situations. The TTS engine (which lives in the page's `speechSynthesis` context) may continue firing events after invalidation, so all engine callbacks are wrapped.
 
-### 10.4 Settings Synchronization
+### 10.5 Settings Synchronization
 
 Settings defaults are defined once in `lib/config.js` as the `SETTINGS_DEFAULTS` object. This file is loaded by content scripts (via `manifest.json`), the popup (via `<script>` tag in `popup.html`), the options page (via `<script>` tag in `options.html`), and the background service worker (via `importScripts`). When adding a new setting, update `SETTINGS_DEFAULTS` in `config.js` and it is available everywhere. All storage writes use `safeSave()` from config.js, which logs quota errors to the console.
 
 Both the popup and options page broadcast setting changes to active tabs via `chrome.tabs.sendMessage({ type: 'updateSettings', settings })`. The content script applies engine settings (voice, rate, pitch, volume, backend) and highlighter settings (colors, word marker style, dim style, auto-scroll) immediately. Content filtering settings (skip selectors, focus mode, reading mode) are only applied at the start of playback since they require re-walking the DOM.
 
-### 10.5 Browser Compatibility
+### 10.6 Browser Compatibility
 
 The extension targets Chromium browsers (Chrome, Brave, Edge). Brave may block content script injection on certain pages when Shields are enabled. The `speechSynthesis` API availability should be verified in the content script context, as some internal browser pages (`chrome://`, `brave://`) do not support it.
